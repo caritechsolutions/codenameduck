@@ -1,0 +1,24 @@
+<XAIT>
+  <versionNumber>{{XAIT_VERSION}}</versionNumber>
+  <AbstractService>
+    <svcName>CoopCentric</svcName>
+    <svcId>0x1204</svcId>
+    <isAutoSelect>true</isAutoSelect>
+    <ApplicationList>
+      <Application>
+        <appName>CoopCentric</appName>
+        <applicationIdentifier><orgId>1</orgId><appId>1</appId></applicationIdentifier>
+        <applicationDescriptor>
+          <type>Hcap-h</type>
+          <controlCode>AUTOSTART</controlCode>
+          <visibility>NOT_VISIBLE_USERS</visibility>
+          <priority>255</priority>
+          <version>{{APP_VERSION}}</version>
+        </applicationDescriptor>
+        <HcapDescriptor>
+          <url>http://{{HOSTNAME}}/procentric/application/index.html</url>
+        </HcapDescriptor>
+      </Application>
+    </ApplicationList>
+  </AbstractService>
+</XAIT>

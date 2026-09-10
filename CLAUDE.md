@@ -1,0 +1,116 @@
+# codenameduck — CoopCentric
+
+Caritech's replacement for the LG Pro:Centric server. Serves LG hospitality TVs / STBs
+(Pro:Centric Smart, webOS) from our own Ubuntu VM, multi-tenant, one hostname per hotel.
+Working name of the server: **coopcentric**.
+
+## How LG Pro:Centric IP deployment actually works (verified from LG docs, Sep 2026)
+
+- The TV is configured in Installation Menu → Pro:Centric: Mode `HTML`, Media Type `IP`,
+  Receive Data `Enable`, Server = Domain Name (no scheme, no path) + Port.
+- On every **power-off** the TV fetches `http://<host>:<port>/procentric/application/xait.xml`.
+  On the next **power-on** it compares `versionNumber` and `Application/version` with the copy
+  it has stored; if both are higher it loads the new app. If both are `0` it re-fetches on every
+  power cycle (dev mode). Production: increment both by 1 per release (0–65535).
+- `xait.xml` `<HcapDescriptor><url>` is absolute and can point anywhere:
+  - remote-run: URL to `index.html` — TV runs it live from the web server
+  - remote-deploy: URL to a `.zip` — TV downloads to local storage and runs from there
+    (needs `<applicationStructure>` with `baseDirectory`, `classpathExtension`, `initialClass`)
+- IP mode fields: `frequency=0`, `programNum=0`, `cTag=0`. Fixed values: `isAutoSelect=true`,
+  `controlCode=AUTOSTART`, `priority=255`, `type=Hcap-h`.
+- Server directory tree the TV expects (names are fixed):
+  ```
+  <docroot>/procentric/application/   xait.xml + app (or app.zip)
+  <docroot>/procentric/system/        firmware, splash image, TV config, CP apps (not used yet)
+  ```
+- Verified: plain HTTP on port 80 through Nginx Proxy Manager returns 200 with the Host header
+  intact. HTTPS support and redirect-following by the TV are NOT yet verified — do not force SSL
+  or add http→https redirects on tenant hostnames.
+- There is **no PMS API on the TV**. Check-in/out logic lives on our server; the TV only has a
+  `checkout` call that wipes guest data.
+
+## TV-side API
+
+Two LG JavaScript libraries, both vendored in `tv-app/lib/`:
+
+| Library | Version | Sets | Style |
+|---|---|---|---|
+| `hcap.js` | 1.24.12.5984 | all Pro:Centric Smart | `hcap.<ns>.<method>({..., onSuccess, onFailure})` |
+| `idcap.js` | 1.1.1 | Pro:Centric webOS 5.0+ (IDPN 1xx+) | `idcap.request("idcap://<path>", {parameters, onSuccess, onFailure})` — also returns a Promise |
+
+Both define separate globals and can be loaded on the same page. Runtime detection: call
+`idcap://configuration/property/get` with `key: "idpn"` under a 4 s timeout; on success use the
+IDCAP path, otherwise fall back to `hcap.property.getProperty({key:"model_name"})`.
+Useful read-only property keys on both: `model_name`, `serial_number`, `platform_version`,
+`firmware_version`, `webos_version`, `idpn` (IDCAP only).
+
+Async rule from LG docs: most calls execute in order, but channel change and file I/O do not —
+completion is signalled by DOM events (`document.addEventListener(...)`), see IDCAP `Ref/Events`.
+Never `return` a value from an onSuccess callback.
+
+`tv-app/index.html` is currently the **probe app**: loads both libs, detects the platform,
+prints model/serial/versions on screen. Keep it as `tv-app/probe.html` when the real renderer
+replaces `index.html`.
+
+## Target architecture
+
+```
+coopcentric VM (Ubuntu 24.04, Proxmox, behind NPM)
+├── nginx
+│   ├── one vhost per tenant: <hotel>.caritech.net → /srv/coopcentric/tenants/<hotel>/
+│   └── admin vhost (later)
+├── /srv/coopcentric/tenants/<hotel>/procentric/{application,system}/
+│   application/ = xait.xml + tv-app build + layout.json for that tenant
+└── admin app (later): tenants, sets, channel maps, layout editor → writes layout.json
+```
+
+Design principle: the TV app is a generic **renderer**. It boots, reads its tenant's
+`layout.json` (zones: video, channel list, welcome text, images, etc.), and draws it.
+Layout changes are published by rewriting `layout.json` — no xait version bump.
+Only renderer code changes bump xait versions. The admin UI is digital-signage style:
+everything configured from a web page, same UI for every tenant.
+
+## Phase 1 — what to build now
+
+1. `install.sh` — idempotent, meant to be run as
+   `curl -fsSL https://raw.githubusercontent.com/caritechsolutions/codenameduck/main/install.sh | sudo bash`
+   on a fresh Ubuntu 24.04 VM. Installs nginx + unzip, creates `/srv/coopcentric`, clones/updates
+   the repo into `/opt/coopcentric`, installs `bin/*` to `/usr/local/bin`, reloads nginx.
+   Re-running updates code and re-deploys `tv-app/` into every existing tenant.
+2. `bin/coopcentric-tenant` — `new <name> <hostname>` creates the tenant tree, renders
+   `nginx/tenant.conf.tmpl` into `/etc/nginx/sites-available/<hostname>`, enables it, writes
+   `xait.xml` from `tv-app/xait.xml.tmpl` (dev mode 0/0, url = `http://<hostname>/procentric/application/index.html`),
+   copies `tv-app/` into `procentric/application/`, chowns to www-data, `nginx -t && reload`.
+   Also `list`, `remove <name>`, `bump <name>` (increments both xait versions).
+3. `nginx/tenant.conf.tmpl` — the vhost below, with `{{HOSTNAME}}` and `{{NAME}}`:
+   ```
+   server {
+       listen 80;
+       server_name {{HOSTNAME}};
+       root /srv/coopcentric/tenants/{{NAME}};
+       access_log /var/log/nginx/{{NAME}}.access.log;
+       location /procentric/ { autoindex off; add_header Cache-Control "no-store"; }
+   }
+   ```
+4. `tv-app/` — probe app as-is (already written), plus `xait.xml.tmpl`.
+
+First tenant already exists by hand on the VM: name `hoteldemo`, host `hoteldemo.caritech.net`.
+`install.sh` must adopt it without breaking it.
+
+## Later phases (do not build yet)
+
+- Renderer + `layout.json` schema
+- Admin app (runtime not yet decided) with layout editor, tenants, sets, channel maps
+- Set registry: TVs POST model/serial/firmware on boot; admin shows fleet status
+- Remote-deploy (.zip) mode for production
+- `/procentric/system/` — firmware, splash, cloning
+- Verify HTTPS / redirect behaviour of the TV fetch
+- Signage (webOS Signage) support via IDCAP — separate server-settings mechanism, unread
+
+## Conventions
+
+- Bash scripts: `set -euo pipefail`, idempotent, print what they did.
+- One change at a time; wait for Richard to confirm on the real VM/TV before moving on.
+- No secrets in the repo. Tenant hostnames are fine.
+- LG API references: `docs/` holds text extracts of the LG doc pages we've read; the full
+  HTML API references are in Richard's downloaded library packages (not committed).

@@ -1,0 +1,286 @@
+#!/usr/bin/env bash
+# coopcentric-tenant — manage CoopCentric tenants (one LG Pro:Centric hostname per hotel).
+#
+#   coopcentric-tenant new <name> <hostname>   create tenant tree, vhost, xait.xml; deploy tv-app
+#   coopcentric-tenant list                    show tenants, hostnames, xait versions, vhost state
+#   coopcentric-tenant deploy [<name>]         (re)deploy tv-app into one or every tenant
+#   coopcentric-tenant bump <name>             increment xait versionNumber and Application/version
+#   coopcentric-tenant remove <name> [--yes]   disable vhost, delete vhost file and tenant tree
+#
+# Idempotent: `new` and `deploy` never overwrite an existing xait.xml or an existing vhost,
+# so hand-made tenants (hoteldemo) are adopted as-is.
+set -euo pipefail
+
+COOPCENTRIC_HOME="${COOPCENTRIC_HOME:-/opt/coopcentric}"      # git checkout of codenameduck
+COOPCENTRIC_ROOT="${COOPCENTRIC_ROOT:-/srv/coopcentric}"      # tenant docroots live here
+NGINX_AVAIL="${NGINX_AVAIL:-/etc/nginx/sites-available}"
+NGINX_ENABLED="${NGINX_ENABLED:-/etc/nginx/sites-enabled}"
+WEB_USER="${WEB_USER:-www-data}"
+
+TENANTS_DIR="$COOPCENTRIC_ROOT/tenants"
+TV_APP_SRC="$COOPCENTRIC_HOME/tv-app"
+VHOST_TMPL="$COOPCENTRIC_HOME/nginx/tenant.conf.tmpl"
+XAIT_TMPL="$TV_APP_SRC/xait.xml.tmpl"
+
+log()  { printf '[coopcentric-tenant] %s\n' "$*"; }
+warn() { printf '[coopcentric-tenant] WARNING: %s\n' "$*" >&2; }
+die()  { printf '[coopcentric-tenant] ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+need_root() { [ "$(id -u)" -eq 0 ] || die "must run as root (use sudo)"; }
+
+valid_name()     { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]; }
+valid_hostname() { [[ "$1" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]]; }
+
+tenant_dir() { printf '%s/%s' "$TENANTS_DIR" "$1"; }
+app_dir()    { printf '%s/procentric/application' "$(tenant_dir "$1")"; }
+xait_path()  { printf '%s/xait.xml' "$(app_dir "$1")"; }
+
+tenant_exists() { [ -d "$(tenant_dir "$1")" ]; }
+
+# Hostname of a tenant = host part of the <url> in its xait.xml (single source of truth).
+tenant_hostname() {
+  local x; x="$(xait_path "$1")"
+  [ -f "$x" ] || return 1
+  sed -n 's|.*<url>[[:space:]]*https\{0,1\}://\([^/:<[:space:]]*\).*|\1|p' "$x" | head -n1 | grep . || return 1
+}
+
+# Print "<versionNumber> <Application/version>" from a tenant's xait.xml.
+xait_versions() {
+  local x xv av; x="$(xait_path "$1")"
+  [ -f "$x" ] || return 1
+  xv="$(sed -n 's|.*<versionNumber>[[:space:]]*\([0-9]\{1,\}\)[[:space:]]*</versionNumber>.*|\1|p' "$x" | head -n1)"
+  av="$(sed -n 's|.*<version>[[:space:]]*\([0-9]\{1,\}\)[[:space:]]*</version>.*|\1|p' "$x" | head -n1)"
+  [ -n "$xv" ] && [ -n "$av" ] || return 1
+  printf '%s %s\n' "$xv" "$av"
+}
+
+# Locate the vhost file for a tenant: any sites-available file whose root is this tenant's
+# directory (covers hand-made vhosts with arbitrary filenames), else <sites-available>/<hostname>.
+find_vhost() {
+  local name="$1" host f
+  if [ -d "$NGINX_AVAIL" ]; then
+    f="$(grep -lsE "^[[:space:]]*root[[:space:]]+$TENANTS_DIR/$name/?[[:space:]]*;" "$NGINX_AVAIL"/* 2>/dev/null | head -n1 || true)"
+    [ -n "$f" ] && { printf '%s' "$f"; return 0; }
+  fi
+  host="$(tenant_hostname "$name" 2>/dev/null || true)"
+  [ -n "$host" ] && [ -f "$NGINX_AVAIL/$host" ] && { printf '%s/%s' "$NGINX_AVAIL" "$host"; return 0; }
+  return 1
+}
+
+vhost_enabled() { # $1 = path in sites-available
+  local f
+  for f in "$NGINX_ENABLED"/*; do
+    [ -e "$f" ] || continue
+    [ "$(readlink -f "$f")" = "$(readlink -f "$1")" ] && return 0
+  done
+  return 1
+}
+
+render_xait() { # $1 host $2 xaitVersion $3 appVersion -> stdout
+  [ -f "$XAIT_TMPL" ] || die "xait template missing: $XAIT_TMPL"
+  sed -e "s|{{HOSTNAME}}|$1|g" -e "s|{{XAIT_VERSION}}|$2|g" -e "s|{{APP_VERSION}}|$3|g" "$XAIT_TMPL"
+}
+
+render_vhost() { # $1 name $2 host -> stdout
+  [ -f "$VHOST_TMPL" ] || die "vhost template missing: $VHOST_TMPL"
+  sed -e "s|{{NAME}}|$1|g" -e "s|{{HOSTNAME}}|$2|g" "$VHOST_TMPL"
+}
+
+nginx_reload() {
+  command -v nginx >/dev/null 2>&1 || { warn "nginx not installed; skipping reload"; return 0; }
+  nginx -t 2>&1 | sed 's/^/[nginx] /'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || die "nginx -t failed; not reloading"
+  if [ -d /run/systemd/system ]; then
+    systemctl reload nginx && log "nginx reloaded"
+  elif pidof nginx >/dev/null 2>&1; then
+    nginx -s reload && log "nginx reloaded (nginx -s reload)"
+  else
+    warn "nginx is not running; config is valid but was not reloaded"
+  fi
+}
+
+fix_owner() {
+  if id -u "$WEB_USER" >/dev/null 2>&1; then
+    chown -R "$WEB_USER:$WEB_USER" "$1"
+  else
+    warn "user $WEB_USER does not exist; leaving ownership of $1 unchanged"
+  fi
+  find "$1" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+}
+
+# Copy tv-app/ into the tenant's procentric/application/. xait.xml and layout.json are
+# tenant-owned and are never touched; everything else is mirrored (stale files removed).
+deploy_app() {
+  local name="$1" dst
+  dst="$(app_dir "$name")"
+  [ -d "$TV_APP_SRC" ] || die "tv-app source missing: $TV_APP_SRC (is $COOPCENTRIC_HOME a checkout of codenameduck?)"
+  mkdir -p "$dst" "$(tenant_dir "$name")/procentric/system"
+  rsync -a --delete \
+    --exclude='xait.xml.tmpl' --exclude='xait.xml' --exclude='layout.json' \
+    "$TV_APP_SRC/" "$dst/"
+  fix_owner "$(tenant_dir "$name")"
+  log "deployed tv-app -> $dst"
+}
+
+# Report on a tenant's xait/vhost state; used by deploy so adopted tenants are visible.
+describe_tenant() {
+  local name="$1" host vh
+  if host="$(tenant_hostname "$name")"; then
+    local ver; ver="$(xait_versions "$name" 2>/dev/null | tr ' ' '/' || true)"
+    log "  hostname: $host  (xait versionNumber/appVersion ${ver:-?/?})"
+  else
+    warn "  $name has no usable xait.xml — run: coopcentric-tenant new $name <hostname>"
+  fi
+  if vh="$(find_vhost "$name")"; then
+    if vhost_enabled "$vh"; then log "  vhost: $vh (enabled)"; else warn "  vhost: $vh exists but is NOT enabled"; fi
+  else
+    warn "  no nginx vhost found for $name — run: coopcentric-tenant new $name <hostname>"
+  fi
+}
+
+cmd_new() {
+  need_root
+  [ $# -eq 2 ] || usage 1
+  local name="$1" host="$2" tdir xait vh
+  valid_name "$name"     || die "invalid tenant name '$name' (lowercase letters, digits, dashes)"
+  valid_hostname "$host" || die "invalid hostname '$host' (bare FQDN, no scheme, no port, no path)"
+  tdir="$(tenant_dir "$name")"; xait="$(xait_path "$name")"
+
+  if tenant_exists "$name"; then log "tenant $name already exists at $tdir — ensuring it is complete"
+  else mkdir -p "$tdir"; log "created $tdir"; fi
+  mkdir -p "$tdir/procentric/application" "$tdir/procentric/system"
+
+  if [ -f "$xait" ]; then
+    log "keeping existing $xait"
+    local cur; cur="$(tenant_hostname "$name" || true)"
+    [ "$cur" = "$host" ] || warn "existing xait.xml points at '$cur', not '$host' — not changing it"
+  else
+    render_xait "$host" 0 0 > "$xait"
+    log "wrote $xait (dev mode: versionNumber=0, version=0, url=http://$host/procentric/application/index.html)"
+  fi
+
+  deploy_app "$name"
+
+  if vh="$(find_vhost "$name")"; then
+    log "keeping existing vhost $vh"
+  else
+    vh="$NGINX_AVAIL/$host"
+    if [ -e "$vh" ]; then
+      die "$vh already exists but does not serve $tdir — resolve by hand"
+    fi
+    if grep -lsE "^[[:space:]]*server_name[[:space:]].*(^|[[:space:]])$host([[:space:]]|;)" "$NGINX_ENABLED"/* >/dev/null 2>&1; then
+      warn "another enabled vhost already claims server_name $host; nginx will warn about conflicts"
+    fi
+    mkdir -p "$NGINX_AVAIL" "$NGINX_ENABLED"
+    render_vhost "$name" "$host" > "$vh"
+    log "wrote $vh"
+  fi
+  if ! vhost_enabled "$vh"; then
+    ln -sfn "$vh" "$NGINX_ENABLED/$(basename "$vh")"
+    log "enabled $NGINX_ENABLED/$(basename "$vh")"
+  fi
+
+  nginx_reload
+  log "tenant $name ready: http://$host/procentric/application/xait.xml"
+}
+
+cmd_deploy() {
+  need_root
+  local name names=()
+  if [ $# -ge 1 ]; then
+    names=("$@")
+  else
+    [ -d "$TENANTS_DIR" ] || { log "no tenants directory at $TENANTS_DIR — nothing to deploy"; return 0; }
+    for d in "$TENANTS_DIR"/*/; do [ -d "$d" ] && names+=("$(basename "$d")"); done
+    [ ${#names[@]} -gt 0 ] || { log "no tenants under $TENANTS_DIR — nothing to deploy"; return 0; }
+  fi
+  for name in "${names[@]}"; do
+    tenant_exists "$name" || die "no such tenant: $name"
+    log "tenant $name:"
+    deploy_app "$name"
+    describe_tenant "$name"
+  done
+}
+
+cmd_bump() {
+  need_root
+  [ $# -eq 1 ] || usage 1
+  local name="$1" xait xv av nxv nav
+  tenant_exists "$name" || die "no such tenant: $name"
+  xait="$(xait_path "$name")"
+  read -r xv av < <(xait_versions "$name") || die "cannot read versions from $xait"
+  nxv=$((xv + 1)); nav=$((av + 1))
+  if [ "$nxv" -gt 65535 ] || [ "$nav" -gt 65535 ]; then
+    die "version would exceed 65535 (xait=$xv app=$av)"
+  fi
+  # Only the first occurrence of each tag is rewritten; <version> is unique in our template.
+  sed -i \
+    -e "0,/<versionNumber>[[:space:]]*${xv}[[:space:]]*<\/versionNumber>/s|<versionNumber>[[:space:]]*${xv}[[:space:]]*</versionNumber>|<versionNumber>${nxv}</versionNumber>|" \
+    -e "0,/<version>[[:space:]]*${av}[[:space:]]*<\/version>/s|<version>[[:space:]]*${av}[[:space:]]*</version>|<version>${nav}</version>|" \
+    "$xait"
+  fix_owner "$(app_dir "$name")"
+  log "bumped $name: versionNumber $xv -> $nxv, Application/version $av -> $nav ($xait)"
+  log "TVs pick this up on their next power-off/power-on cycle"
+}
+
+cmd_remove() {
+  need_root
+  [ $# -ge 1 ] || usage 1
+  local name="$1" yes=0 tdir vh
+  [ "${2:-}" = "--yes" ] && yes=1
+  tenant_exists "$name" || die "no such tenant: $name"
+  tdir="$(tenant_dir "$name")"
+  vh="$(find_vhost "$name" || true)"
+  log "about to remove tenant $name:"
+  log "  delete $tdir"
+  [ -n "$vh" ] && log "  disable and delete vhost $vh"
+  if [ "$yes" -ne 1 ]; then
+    [ -t 0 ] || die "refusing to remove without confirmation; re-run with --yes"
+    read -r -p "[coopcentric-tenant] type the tenant name to confirm: " ans
+    [ "$ans" = "$name" ] || die "aborted"
+  fi
+  if [ -n "$vh" ]; then
+    local f
+    for f in "$NGINX_ENABLED"/*; do
+      [ -e "$f" ] || continue
+      [ "$(readlink -f "$f")" = "$(readlink -f "$vh")" ] && rm -f "$f" && log "disabled $f"
+    done
+    rm -f "$vh" && log "deleted $vh"
+  fi
+  rm -rf "$tdir" && log "deleted $tdir"
+  nginx_reload
+  log "tenant $name removed (nginx access log left in place)"
+}
+
+cmd_list() {
+  [ -d "$TENANTS_DIR" ] || { log "no tenants directory at $TENANTS_DIR"; return 0; }
+  local d name host ver vh vstate app
+  printf '%-16s %-32s %-11s %-9s %s\n' NAME HOSTNAME XAIT/APP APP VHOST
+  for d in "$TENANTS_DIR"/*/; do
+    [ -d "$d" ] || continue
+    name="$(basename "$d")"
+    host="$(tenant_hostname "$name" 2>/dev/null || echo '-')"
+    ver="$(xait_versions "$name" 2>/dev/null | tr ' ' '/' || true)"; ver="${ver:--}"
+    app="missing"; [ -f "$(app_dir "$name")/index.html" ] && app="deployed"
+    if vh="$(find_vhost "$name")"; then
+      if vhost_enabled "$vh"; then vstate="enabled"; else vstate="disabled ($(basename "$vh"))"; fi
+    else vstate="missing"; fi
+    printf '%-16s %-32s %-11s %-9s %s\n' "$name" "$host" "$ver" "$app" "$vstate"
+  done
+}
+
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    new)     cmd_new "$@" ;;
+    list|ls) cmd_list "$@" ;;
+    deploy)  cmd_deploy "$@" ;;
+    bump)    cmd_bump "$@" ;;
+    remove|rm) cmd_remove "$@" ;;
+    -h|--help|help|"") usage 0 ;;
+    *) die "unknown command '$cmd' (try --help)" ;;
+  esac
+}
+main "$@"

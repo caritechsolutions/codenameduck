@@ -1,0 +1,13 @@
+# CoopCentric tenant vhost — rendered by coopcentric-tenant, do not edit by hand.
+# Tenant: {{NAME}}
+server {
+    listen 80;
+    server_name {{HOSTNAME}};
+    root /srv/coopcentric/tenants/{{NAME}};
+    access_log /var/log/nginx/{{NAME}}.access.log;
+
+    location /procentric/ {
+        autoindex off;
+        add_header Cache-Control "no-store";
+    }
+}

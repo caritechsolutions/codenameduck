@@ -4,6 +4,7 @@ import { get, patch, del, post } from '../api.js';
 import { useAsync, Drawer, Confirm, Field, Status, Empty, useToast } from '../components/ui.jsx';
 import { timeAgo, fmtDate, fmtUptime } from '../util.js';
 import SetCommands from '../components/SetCommands.jsx';
+import BulkBar from '../components/BulkBar.jsx';
 
 export default function Sets() {
   const { id } = useParams();
@@ -13,6 +14,8 @@ export default function Sets() {
   const sets = useAsync(() => get('/sets'), []);
   const groups = useAsync(() => get('/groups'), []);
   const layouts = useAsync(() => get('/layouts'), []);
+  const lineups = useAsync(() => get('/lineups'), []);
+  const [checked, setChecked] = useState([]);
   useEffect(() => { const t = setInterval(sets.reload, 10000); return () => clearInterval(t); }, [sets.reload]);
 
   const rows = useMemo(() => {
@@ -40,13 +43,15 @@ export default function Sets() {
         </div>
       </div>
       {sets.error && <div className="error">{sets.error.message}</div>}
+      {checked.length > 0 && <BulkBar ids={checked} onDone={() => { setChecked([]); sets.reload(); }} />}
       <div className="card" style={{ padding: 0 }}>
         {sets.data && rows.length === 0 ? <Empty>{sets.data.length ? 'No sets match.' : 'No sets yet. A TV registers itself the first time it loads the app.'}</Empty> : (
           <table>
-            <thead><tr><th>Status</th><th>Room</th><th>Serial</th><th>Model</th><th>Group</th><th>API</th><th>Firmware</th><th>IP</th><th>Last seen</th></tr></thead>
+            <thead><tr><th style={{ width: 30 }}><input type="checkbox" aria-label="select all" checked={rows.length > 0 && rows.every((r) => checked.includes(r.id))} onChange={(e) => setChecked(e.target.checked ? rows.map((r) => r.id) : [])} /></th><th>Status</th><th>Room</th><th>Serial</th><th>Model</th><th>Group</th><th>API</th><th>Firmware</th><th>IP</th><th>Last seen</th></tr></thead>
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id} className={'clickable' + (selected && selected.id === s.id ? ' selected' : '')} onClick={() => nav(`/sets/${s.id}`)}>
+                  <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`select ${s.serial}`} checked={checked.includes(s.id)} onChange={(e) => setChecked(e.target.checked ? [...checked, s.id] : checked.filter((x) => x !== s.id))} /></td>
                   <td><Status online={s.online} ws={s.ws} /></td>
                   <td>{s.room_number ? <b>{s.room_number}</b> : <span className="pill warn">no room</span>}</td>
                   <td className="mono">{s.serial}</td>
@@ -61,16 +66,16 @@ export default function Sets() {
           </table>)}
       </div>
       {id && sets.data && !selected && <Drawer title="Set not found" onClose={() => nav('/sets')}><Empty>This set no longer exists.</Empty></Drawer>}
-      {selected && <SetDrawer key={selected.id} set={selected} groups={groups.data || []} layouts={layouts.data || []}
+      {selected && <SetDrawer key={selected.id} set={selected} groups={groups.data || []} layouts={layouts.data || []} lineups={lineups.data || []}
         onClose={() => nav('/sets')} onChanged={(s) => sets.setData(sets.data.map((x) => (x.id === s.id ? { ...x, ...s } : x)))}
         onDeleted={() => { sets.setData(sets.data.filter((x) => x.id !== selected.id)); nav('/sets'); }} />}
     </>
   );
 }
 
-function SetDrawer({ set, groups, layouts, onClose, onChanged, onDeleted }) {
+function SetDrawer({ set, groups, layouts, lineups, onClose, onChanged, onDeleted }) {
   const toast = useToast();
-  const [form, setForm] = useState({ room_number: set.room_number || '', group_id: set.group_id || '', layout_override_id: set.layout_override_id || '', notes: set.notes || '' });
+  const [form, setForm] = useState({ room_number: set.room_number || '', group_id: set.group_id || '', layout_override_id: set.layout_override_id || '', lineup_override_id: set.lineup_override_id || '', notes: set.notes || '' });
   const [detail, setDetail] = useState(null);
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -78,13 +83,13 @@ function SetDrawer({ set, groups, layouts, onClose, onChanged, onDeleted }) {
   useEffect(() => { loadDetail(); const t = setInterval(loadDetail, 5000); return () => clearInterval(t); }, [loadDetail]);
 
   const dirty = form.room_number !== (set.room_number || '') || String(form.group_id) !== String(set.group_id || '') ||
-    String(form.layout_override_id) !== String(set.layout_override_id || '') || form.notes !== (set.notes || '');
+    String(form.layout_override_id) !== String(set.layout_override_id || '') || String(form.lineup_override_id) !== String(set.lineup_override_id || '') || form.notes !== (set.notes || '');
 
   async function save() {
     setSaving(true);
     try {
       const body = { room_number: form.room_number || null, group_id: form.group_id ? Number(form.group_id) : null,
-        layout_override_id: form.layout_override_id ? Number(form.layout_override_id) : null, notes: form.notes || null };
+        layout_override_id: form.layout_override_id ? Number(form.layout_override_id) : null, lineup_override_id: form.lineup_override_id ? Number(form.lineup_override_id) : null, notes: form.notes || null };
       const s = await patch(`/sets/${set.id}`, body);
       onChanged(s); toast('Saved' + (body.room_number !== set.room_number ? ' — room number pushed to the TV' : ''));
       loadDetail();
@@ -117,8 +122,12 @@ function SetDrawer({ set, groups, layouts, onClose, onChanged, onDeleted }) {
           <Field label="Group"><select value={form.group_id} onChange={(e) => setForm({ ...form, group_id: e.target.value })}>
             <option value="">— none —</option>{groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select></Field>
         </div>
-        <Field label="Layout override" hint="Leave empty to use the group's layout."><select value={form.layout_override_id} onChange={(e) => setForm({ ...form, layout_override_id: e.target.value })}>
-          <option value="">— group layout —</option>{layouts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>
+        <div className="row">
+          <Field label="Layout override" hint="Empty = group's layout."><select value={form.layout_override_id} onChange={(e) => setForm({ ...form, layout_override_id: e.target.value })}>
+            <option value="">— group layout —</option>{layouts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>
+          <Field label="Lineup override" hint="Empty = group's lineup."><select value={form.lineup_override_id} onChange={(e) => setForm({ ...form, lineup_override_id: e.target.value })}>
+            <option value="">— group lineup —</option>{lineups.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></Field>
+        </div>
         <Field label="Notes"><input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
         <div className="actions"><button className="primary" disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save'}</button>
           {detail && detail.layout && <span className="muted small">showing layout: <b>{detail.layout.name}</b>{detail.layout.builtin ? ' (built-in)' : ''}</span>}</div>

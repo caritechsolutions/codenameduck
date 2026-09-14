@@ -8,7 +8,7 @@ const { isFactoryRoom } = require('../state');
 
 const ONLINE_SQL = `((julianday('now') - julianday(s.last_seen)) * 86400 < 180)`;
 
-function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
+function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = () => {} }) {
   const r = express.Router();
 
   // ---------------------------------------------------------------- auth
@@ -84,7 +84,8 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
     res.json({ ...setToApi(s),
       events: qSetEvents.all(s.id).map((e) => ({ ...e, payload: safe(e.payload_json), payload_json: undefined })),
       commands: commands.recent(s.id, 20),
-      layout: state(req).resolveLayout(req.tenant, s) });
+      layout: state(req).resolveLayout(req.tenant, s),
+      lineup: state(req).resolveLineup(req.tenant, s) });
   });
   r.patch('/sets/:id', (req, res) => {
     const s = loadSet(req, res); if (!s) return;
@@ -102,7 +103,8 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
       if (b.layout_override_id != null && !qLayout.get(Number(b.layout_override_id), req.tenant.id)) return res.status(400).json({ error: 'unknown layout' });
       upd.layout_override_id = b.layout_override_id == null ? null : Number(b.layout_override_id);
     }
-    if ('lineup_override_id' in b && hasColumn('sets', 'lineup_override_id')) {
+    if ('lineup_override_id' in b) {
+      if (b.lineup_override_id != null && !db.prepare('SELECT id FROM lineups WHERE id = ? AND tenant_id = ?').get(Number(b.lineup_override_id), req.tenant.id)) return res.status(400).json({ error: 'unknown lineup' });
       upd.lineup_override_id = b.lineup_override_id == null ? null : Number(b.lineup_override_id);
     }
     if ('notes' in b) upd.notes = b.notes == null ? null : String(b.notes).slice(0, 2000);
@@ -126,9 +128,10 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
   });
 
   // ---------------------------------------------------------------- groups
-  const qGroups = db.prepare(`SELECT g.*, la.layout_id, l.name AS layout_name,
+  const qGroups = db.prepare(`SELECT g.*, la.layout_id, l.name AS layout_name, lu.lineup_id, lp.name AS lineup_name,
       (SELECT COUNT(*) FROM sets s WHERE s.group_id = g.id) AS set_count
     FROM groups g LEFT JOIN layout_assign la ON la.group_id = g.id LEFT JOIN layouts l ON l.id = la.layout_id
+    LEFT JOIN lineup_assign lu ON lu.group_id = g.id LEFT JOIN lineups lp ON lp.id = lu.lineup_id
     WHERE g.tenant_id = ? ORDER BY g.name`);
   const qGroupFull = db.prepare(`SELECT g.*, la.layout_id FROM groups g LEFT JOIN layout_assign la ON la.group_id = g.id WHERE g.id = ? AND g.tenant_id = ?`);
   r.get('/groups', (req, res) => res.json(qGroups.all(req.tenant.id)));
@@ -252,6 +255,27 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
     log(`admin ${req.user.username}: ${type} -> set ${s.id} (${s.serial}) [${cmd.status}]`);
     res.status(201).json({ id: cmd.id, type: cmd.type, status: cmd.status });
   });
+  r.get('/sets/:id/screenshot', (req, res) => {
+    const s = loadSet(req, res); if (!s) return;
+    const f = screenshots && screenshots.latest(s.id);
+    if (!f) return res.status(404).json({ error: 'no screenshot yet' });
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(f);
+  });
+  // Bulk: {type, payload, set_ids?:[], group_id?, all?:true}
+  r.post('/commands', (req, res) => {
+    const { type, payload, set_ids, group_id, all } = req.body || {};
+    if (!commands.TYPES.includes(type)) return res.status(400).json({ error: `unknown command type; one of ${commands.TYPES.join(', ')}` });
+    let targets;
+    if (all) targets = db.prepare('SELECT * FROM sets WHERE tenant_id = ?').all(req.tenant.id);
+    else if (group_id != null) targets = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND group_id = ?').all(req.tenant.id, Number(group_id));
+    else if (Array.isArray(set_ids) && set_ids.length) targets = set_ids.map((id) => qSet.get(Number(id), req.tenant.id)).filter(Boolean);
+    else return res.status(400).json({ error: 'set_ids, group_id or all required' });
+    let sent = 0, queued = 0;
+    for (const s of targets) { const c = commands.queue(req.tenant, s, type, payload && typeof payload === 'object' ? payload : {}); if (c.status === 'sent') sent++; else queued++; }
+    log(`admin ${req.user.username}: bulk ${type} -> ${targets.length} set(s) (${sent} sent, ${queued} queued)`);
+    res.json({ targets: targets.length, sent, queued });
+  });
   r.get('/sets/:id/commands', (req, res) => {
     const s = loadSet(req, res); if (!s) return;
     res.json(commands.recent(s.id, Number(req.query.limit) || 50));
@@ -270,6 +294,10 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
       if (b.default_layout_id != null && !qLayout.get(Number(b.default_layout_id), req.tenant.id)) return res.status(400).json({ error: 'unknown layout' });
       db.prepare('UPDATE tenants SET default_layout_id = ? WHERE id = ?').run(b.default_layout_id == null ? null : Number(b.default_layout_id), req.tenant.id);
     }
+    if ('default_lineup_id' in b) {
+      if (b.default_lineup_id != null && !db.prepare('SELECT id FROM lineups WHERE id = ? AND tenant_id = ?').get(Number(b.default_lineup_id), req.tenant.id)) return res.status(400).json({ error: 'unknown lineup' });
+      db.prepare('UPDATE tenants SET default_lineup_id = ? WHERE id = ?').run(b.default_lineup_id == null ? null : Number(b.default_lineup_id), req.tenant.id);
+    }
     if ('display_name' in b) {
       const v = String(b.display_name || '').trim().slice(0, 80);
       if (v) db.prepare('UPDATE tenants SET display_name = ? WHERE id = ?').run(v, req.tenant.id);
@@ -283,7 +311,7 @@ function createAdminRouter({ db, auth, hub, commands, log = () => {} }) {
   return r;
 }
 
-function publicTenant(t) { return { id: t.id, name: t.name, hostname: t.hostname, display_name: t.display_name, default_layout_id: t.default_layout_id }; }
+function publicTenant(t) { return { id: t.id, name: t.name, hostname: t.hostname, display_name: t.display_name, default_layout_id: t.default_layout_id, default_lineup_id: t.default_lineup_id }; }
 function safe(s, fb = null) { try { return s == null ? fb : JSON.parse(s); } catch { return fb; } }
 function str(v, max) { if (v == null) return null; const s = String(v).trim().slice(0, max); return s || null; }
 

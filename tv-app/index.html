@@ -11,12 +11,29 @@
   #stage{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:#0b1a2a;background-size:cover;background-position:center}
   .zone{position:absolute;overflow:hidden;box-sizing:border-box;white-space:pre-wrap;line-height:1.15}
   .zone img{width:100%;height:100%;object-fit:contain;display:block}
+  .zone-video{background:url('TV:');}
+  .chlist{display:flex;flex-direction:column}
+  .chrow{display:flex;align-items:center;gap:16px;padding:0 16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:8px}
+  .chrow.current{background:rgba(255,255,255,.18)}
+  .chnum{min-width:2.2em;text-align:right;font-weight:bold;opacity:.9}
+  .chlogo{height:70%;width:auto!important;max-width:3em;object-fit:contain}
+  .chname{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .menuitem{padding:.35em .8em;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .menuitem.focused{background:rgba(255,255,255,.22)}
+  #overlay{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;pointer-events:none}
+  .banner{position:absolute;left:80px;bottom:120px;padding:18px 36px;font-size:48px;background:rgba(0,0,0,.65);border-radius:14px;opacity:0;transition:opacity .2s}
+  .banner.show{opacity:1}
+  .digits{position:absolute;right:80px;top:60px;padding:14px 30px;font-size:72px;font-weight:bold;background:rgba(0,0,0,.65);border-radius:14px;display:none}
+  .digits.show{display:block}
+  .message{position:absolute;left:0;right:0;bottom:0;padding:26px 80px;font-size:40px;background:rgba(200,30,30,.92);display:none}
+  .message.show{display:block}
   #status{position:absolute;left:0;right:0;bottom:0;padding:6px 16px;font-size:20px;color:#9ab;background:rgba(0,0,0,.55);display:none;white-space:pre-wrap;max-height:300px;overflow:hidden}
   #status.show{display:block}
 </style>
 </head>
 <body>
 <div id="stage"></div>
+<div id="overlay"><div class="banner"></div><div class="digits"></div><div class="message"></div></div>
 <div id="status"></div>
 <script src="./app.js"></script>
 </body>

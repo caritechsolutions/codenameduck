@@ -180,3 +180,20 @@ Decisions already made (do not re-open):
   point a browser test at a real tenant hostname — it will hit the production VM. Tests use
   `127.0.0.1` tenants or a `.test` hostname.
 - Per-step TV checklists live in `docs/TV-TEST-PLAN.md`.
+
+### Phase 2 step 3 — channels, lineups, video, keys, commands (built 2026-09-14)
+
+- `server/src/channels.js` validates channel params (ip multicast / ip url / rf classes) and
+  parses/produces CSV; `routes/channels.js` = channels + lineups CRUD, group lineup assignment,
+  CSV import/export. Lineup precedence: set override → group → tenant default → none.
+  `POST /api/tv/upload` stores screenshots under `<data>/screenshots/<set>.jpg|png`;
+  `POST /api/admin/commands` is the bulk endpoint (set_ids | group_id | all).
+- `tv-app/src/platform.js` is the IDCAP/HCAP adapter (tune via channel or media path, video
+  size, key table, volume, toast, power, screenshot, launch, checkout). `main.js` renders
+  `video` (transparent `url('TV:')` hole + `video/size/set` after `channel_changed`),
+  `channel_list`, `menu`, `html`; handles CH±, digits, PORTAL/GUIDE, INFO, BACK, UP/DOWN/OK;
+  runs every command in the PLATFORM.md table and acks. Claimed keys: CH±, 0-9, PORTAL, GUIDE,
+  INFO, BACK, LAST_CH (attribute 1); volume/mute stay with the TV.
+- Unverified on hardware, flagged in the test plan: IDCAP `toastmsg/create` param name (we send
+  both `msg` and `message`), `power/command powerOff`, the screenshot capture URI being
+  fetchable via XHR, and HCAP parameter names for volume/toast/launch.

@@ -1,6 +1,7 @@
 'use strict';
 // TV-facing API (docs/PLATFORM.md "TV ↔ server protocol"). Tenant-scoped via req.tenant.
 const crypto = require('crypto');
+const path = require('path');
 const express = require('express');
 const { isFactoryRoom } = require('../state');
 
@@ -18,7 +19,7 @@ function clientIp(req) {
   return req.socket.remoteAddress || null;
 }
 
-function createTvRouter({ db, state, commands, hub, log = () => {} }) {
+function createTvRouter({ db, state, commands, hub, screenshots, log = () => {} }) {
   const router = express.Router();
   const findSet = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND serial = ?');
   const findSetById = db.prepare('SELECT * FROM sets WHERE id = ? AND tenant_id = ?');
@@ -98,6 +99,29 @@ function createTvRouter({ db, state, commands, hub, log = () => {} }) {
     const b = req.body || {};
     const ok = commands ? commands.ack(set.id, Number(b.command_id), !!b.ok, b.result) : false;
     res.json({ ok });
+  });
+
+  // POST /api/tv/upload?set_id&token&command_id=  — screenshot upload. Body: raw image
+  // (Content-Type image/jpeg|png) or JSON {data_url:"data:image/png;base64,..."}.
+  const rawImage = express.raw({ type: ['image/*', 'application/octet-stream'], limit: '8mb' });
+  router.post('/upload', rawImage, (req, res) => {
+    const set = authSet(req, res); if (!set) return;
+    if (!screenshots) return res.status(503).json({ error: 'screenshot storage not configured' });
+    let buf = null, ext = 'jpg';
+    if (Buffer.isBuffer(req.body) && req.body.length) {
+      buf = req.body; ext = /png/.test(req.headers['content-type'] || '') ? 'png' : 'jpg';
+    } else if (req.body && typeof req.body.data_url === 'string') {
+      const m = /^data:image\/(png|jpe?g);base64,(.+)$/i.exec(req.body.data_url);
+      if (!m) return res.status(400).json({ error: 'data_url must be a base64 PNG or JPEG' });
+      buf = Buffer.from(m[2], 'base64'); ext = m[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+    }
+    if (!buf || !buf.length) return res.status(400).json({ error: 'no image data' });
+    const file = screenshots.save(set.id, buf, ext);
+    db.prepare(`UPDATE sets SET screenshot_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`).run(set.id);
+    const cid = Number(req.query.command_id);
+    if (cid && commands) commands.ack(set.id, cid, true, { file: path.basename(file), bytes: buf.length });
+    log(`${req.tenant.name}: screenshot from set ${set.id} (${buf.length} bytes)`);
+    res.json({ ok: true, bytes: buf.length });
   });
 
   return router;

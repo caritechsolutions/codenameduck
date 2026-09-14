@@ -34,3 +34,32 @@ On the TV / in admin:
    immediately (WebSocket reconnect).
 8. "Reboot TV" and "Reload app" buttons in the drawer: reboot must reboot the set; reload must
    reload the app. Both should show `acked` in the commands table.
+
+## Step 3 — channels, lineups, live video, remote keys, commands
+
+Prerequisite: an IP multicast (or HLS URL) stream reachable from the TV's network.
+
+1. **Channels** → New channel: number 5, name, IP multicast `239.x.x.x:port` (udp). Add a second
+   one. Optionally an HLS URL channel (uses the TV's media player instead of the tuner).
+2. **Lineups** → New lineup, add both channels, Save & publish, tick group "Standard rooms".
+3. **Layouts** → open "Standard room". The starter JSON has a `video` zone (right) and a
+   `channel_list` zone (left). Save & publish. Within a second the TV must show live video
+   inside the video rectangle, the channel list on the left with the current channel highlighted,
+   and a channel banner ("5  Name") for ~3 s.
+4. Remote: **CH+ / CH−** walk the lineup (banner + highlight follow). **Digits** ("7" then wait
+   2.5 s, or digit + OK) jump by channel number; an unknown number shows "no such channel".
+   **INFO** shows the banner. **PORTAL** (or GUIDE) toggles the full-screen screen (video only)
+   and back. If the layout has a `menu` zone: **UP/DOWN** move focus, **OK** activates, **BACK**
+   closes a page. **VOL+/−/MUTE** stay with the TV firmware.
+5. Admin set drawer: **Tune to** a channel → TV changes and command shows `acked`. **Volume**
+   set + **Mute** → TV follows; the drawer's "Channel / volume" line updates on the next
+   heartbeat (≤60 s). **Message** → red bar at the bottom of the TV for the given seconds.
+   **Toast** → LG system toast. **Screenshot** → after a few seconds a "Screenshot … ago" link
+   appears in the drawer; open it. If instead the command shows `acked` with a note like
+   "capture uri not readable", tell me the note text — the TV's capture URI scheme needs a
+   different fetch path. **Reboot**, **Power off**, **Checkout**, **Reload app**: each `acked`
+   and the TV does it (power off: TV goes to standby; power *on* from the app is not possible).
+6. Select two or more sets with the checkboxes → bulk bar: message / reboot to all selected.
+7. Edit the lineup (remove the current channel) → TV retunes to the first channel immediately.
+8. HLS URL channel (if defined): switching to it and back to a multicast channel must work
+   (media player start/stop is sequenced as in LG's Channel_Media sample).

@@ -9,7 +9,7 @@ const db = openDb(config.dbPath);
 const applied = migrate(db, (m) => log(`${new Date().toISOString()} ${m}`));
 log(`${new Date().toISOString()} database ${config.dbPath} ready (${applied} migration(s) applied)`);
 
-const { server, hub } = createServer({ db, tenantsDir: config.tenantsDir, adminDist: config.adminDist, pollIntervalS: config.pollIntervalS, log });
+const { server, hub } = createServer({ db, tenantsDir: config.tenantsDir, adminDist: config.adminDist, dataDir: config.dataDir, pollIntervalS: config.pollIntervalS, log });
 server.listen(config.port, config.host, () => {
   log(`${new Date().toISOString()} coopcentric server listening on http://${config.host}:${config.port} (tenants: ${config.tenantsDir}, admin: ${config.adminDist})`);
 });

@@ -10,12 +10,14 @@ const { createAuth, seedSuperadmin } = require('./auth');
 const { createStateBuilder } = require('./state');
 const { createHub } = require('./ws');
 const { createCommands } = require('./commands');
+const { createChannelsRouter } = require('./routes/channels');
+const { createScreenshotStore } = require('./screenshots');
 
 function timestamp() { return new Date().toISOString(); }
 
 // Builds the Express app + HTTP server + WebSocket hub. Returns { app, server, hub, ... }.
 // Tests call this with an in-memory DB and a temp tenants dir.
-function createServer({ db, tenantsDir, adminDist, pollIntervalS = 60, log = console.log }) {
+function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -32,6 +34,7 @@ function createServer({ db, tenantsDir, adminDist, pollIntervalS = 60, log = con
   const commands = createCommands(db, hub, logger);
   hub.setCommands(commands);
   app.locals.state = state;
+  const screenshots = dataDir ? createScreenshotStore(path.join(dataDir, 'screenshots')) : null;
 
   const seeded = seedSuperadmin(db);
   if (seeded) {
@@ -50,8 +53,10 @@ function createServer({ db, tenantsDir, adminDist, pollIntervalS = 60, log = con
 
   app.use('/api', tenants.middleware);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.use('/api/tv', createTvRouter({ db, state, commands, hub, log: logger }));
-  app.use('/api/admin', createAdminRouter({ db, auth, hub, commands, log: logger }));
+  app.use('/api/tv', createTvRouter({ db, state, commands, hub, screenshots, log: logger }));
+  const admin = createAdminRouter({ db, auth, hub, commands, screenshots, log: logger });
+  admin.use(createChannelsRouter({ db, hub, log: logger }));
+  app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
   // Admin UI: built Vite bundle when present, placeholder until then.

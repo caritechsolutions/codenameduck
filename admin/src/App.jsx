@@ -8,6 +8,8 @@ import Sets from './pages/Sets.jsx';
 import Groups from './pages/Groups.jsx';
 import Layouts from './pages/Layouts.jsx';
 import LayoutEdit from './pages/LayoutEdit.jsx';
+import Channels from './pages/Channels.jsx';
+import Lineups from './pages/Lineups.jsx';
 
 export const SessionCtx = React.createContext(null);
 
@@ -16,6 +18,8 @@ const NAV = [
   ['/sets', 'Sets', '▭'],
   ['/groups', 'Groups', '⊞'],
   ['/layouts', 'Layouts', '▤'],
+  ['/channels', 'Channels', '▶'],
+  ['/lineups', 'Lineups', '☰'],
 ];
 
 export default function App() {
@@ -58,6 +62,8 @@ export default function App() {
               <Route path="/groups" element={<Groups />} />
               <Route path="/layouts" element={<Layouts />} />
               <Route path="/layouts/:id" element={<LayoutEdit />} />
+              <Route path="/channels" element={<Channels />} />
+              <Route path="/lineups" element={<Lineups />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

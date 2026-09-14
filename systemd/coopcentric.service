@@ -1,0 +1,31 @@
+[Unit]
+Description=CoopCentric server (LG Pro:Centric replacement)
+Documentation=https://github.com/caritechsolutions/codenameduck
+After=network.target
+Wants=nginx.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/coopcentric/server
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+Environment=COOPCENTRIC_DATA=/srv/coopcentric/data
+Environment=COOPCENTRIC_TENANTS=/srv/coopcentric/tenants
+ExecStart=/usr/bin/node /opt/coopcentric/server/src/index.js
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# Hardening: only the data dir and the tenant trees are writable.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/coopcentric/data /srv/coopcentric/tenants
+
+[Install]
+WantedBy=multi-user.target

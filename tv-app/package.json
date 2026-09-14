@@ -1,0 +1,14 @@
+{
+  "name": "coopcentric-tv-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CoopCentric TV renderer for LG Pro:Centric sets (vanilla JS, bundled by esbuild to ES2015)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5"
+  }
+}

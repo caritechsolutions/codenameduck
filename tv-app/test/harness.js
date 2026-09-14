@@ -23,7 +23,7 @@ async function startStack(opts = {}) {
   migrate(db);
   const logs = [];
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-e2e-data-'));
-  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir, pollIntervalS: 15, log: (m) => logs.push(m) });
+  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir, pollIntervalS: 15, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand });
   srv.app.use('/procentric/application', express.static(DIST, { etag: false, cacheControl: false }));
   await new Promise((r) => srv.server.listen(0, '127.0.0.1', r));
   const port = srv.server.address().port;

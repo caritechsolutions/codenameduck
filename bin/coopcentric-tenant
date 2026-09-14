@@ -20,7 +20,7 @@ NGINX_AVAIL="${NGINX_AVAIL:-/etc/nginx/sites-available}"
 NGINX_ENABLED="${NGINX_ENABLED:-/etc/nginx/sites-enabled}"
 WEB_USER="${WEB_USER:-www-data}"
 
-TENANTS_DIR="$COOPCENTRIC_ROOT/tenants"
+TENANTS_DIR="${COOPCENTRIC_TENANTS_DIR:-$COOPCENTRIC_ROOT/tenants}"   # server passes the exact dir it watches
 TV_APP_DIR="$COOPCENTRIC_HOME/tv-app"          # source (xait.xml.tmpl lives here)
 TV_APP_SRC="$TV_APP_DIR/dist"                  # built tree produced by `npm run build` in tv-app/
 VHOST_TMPL="$COOPCENTRIC_HOME/nginx/tenant.conf.tmpl"
@@ -146,15 +146,16 @@ fix_owner() {
   find "$1" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 }
 
-# Copy tv-app/ into the tenant's procentric/application/. xait.xml and layout.json are
-# tenant-owned and are never touched; everything else is mirrored (stale files removed).
+# Copy the tv-app build into the tenant's procentric/application/. xait.xml, layout.json and
+# assets/ are tenant-owned and never touched; everything else is mirrored (stale files removed).
 deploy_app() {
   local name="$1" dst
   dst="$(app_dir "$name")"
   [ -f "$TV_APP_SRC/index.html" ] || die "tv-app build missing: $TV_APP_SRC — run: cd $TV_APP_DIR && npm ci && npm run build (install.sh does this)"
   mkdir -p "$dst" "$(tenant_dir "$name")/procentric/system"
+  # assets/ holds tenant uploads (logos, backgrounds) written by the admin — never touched here.
   rsync -a --delete \
-    --exclude='xait.xml.tmpl' --exclude='xait.xml' --exclude='layout.json' \
+    --exclude='xait.xml.tmpl' --exclude='xait.xml' --exclude='layout.json' --exclude='assets/' \
     "$TV_APP_SRC/" "$dst/"
   fix_owner "$(tenant_dir "$name")"
   log "deployed tv-app -> $dst"

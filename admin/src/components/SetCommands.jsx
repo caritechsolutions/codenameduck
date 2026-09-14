@@ -29,6 +29,12 @@ export default function SetCommands({ set, detail, onDone }) {
       onDone && onDone();
     } catch (e) { toast(e.message, 'bad'); } finally { setBusy(null); }
   }
+  async function checkout() {
+    if (!window.confirm(`Check out ${set.room_number ? 'room ' + set.room_number : set.serial}? The TV wipes guest data and this set's messages are removed.`)) return;
+    setBusy('checkout');
+    try { const r = await post(`/sets/${set.id}/checkout`); toast(`Checkout ${r.command.status === 'sent' ? 'sent to the TV' : 'queued'}`); onDone && onDone(); }
+    catch (e) { toast(e.message, 'bad'); } finally { setBusy(null); }
+  }
   async function refresh() {
     setBusy('refresh');
     try { const r = await post(`/sets/${set.id}/refresh`); toast(r.pushed ? 'Layout re-sent over WebSocket' : 'Set is not connected; it will pick the layout up on its next poll'); }
@@ -45,7 +51,7 @@ export default function SetCommands({ set, detail, onDone }) {
         <button className="sm" disabled={!!busy} onClick={() => run('reboot', {}, 'Reboot')}>Reboot TV</button>
         <button className="sm" disabled={!!busy} onClick={() => run('power', { mode: 'off' }, 'Power off')}>Power off</button>
         <button className="sm" disabled={!!busy} onClick={() => run('screenshot', {}, 'Screenshot')}>Screenshot</button>
-        <button className="sm" disabled={!!busy} onClick={() => run('checkout', {}, 'Checkout')} title="LG checkout: wipes guest data on the set">Checkout</button>
+        <button className="sm" disabled={!!busy} onClick={checkout} title="Removes this set's messages and runs LG checkout (wipes guest data on the set)">Checkout</button>
         <button className="sm" disabled={!!busy} onClick={() => run('set_property', { key: 'room_number', value: set.room_number || '' }, 'Room sync')} title="Write the admin room number into the TV's room_number property">Sync room to TV</button>
       </div>
       <div className="row">

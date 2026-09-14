@@ -64,6 +64,7 @@ function createAuth(db) {
     const id = crypto.randomBytes(32).toString('base64url');
     const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
     insertSession.run(id, user.id, expires, ip || null);
+    try { db.prepare("UPDATE users SET last_login = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?").run(user.id); } catch { /* column added in 004 */ }
     if (Math.random() < 0.05) purge.run();
     return { user: publicUser(user), sessionId: id, expires };
   }

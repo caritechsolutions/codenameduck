@@ -19,7 +19,7 @@ function clientIp(req) {
   return req.socket.remoteAddress || null;
 }
 
-function createTvRouter({ db, state, commands, hub, screenshots, log = () => {} }) {
+function createTvRouter({ db, state, commands, hub, screenshots, weather, log = () => {} }) {
   const router = express.Router();
   const findSet = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND serial = ?');
   const findSetById = db.prepare('SELECT * FROM sets WHERE id = ? AND tenant_id = ?');
@@ -122,6 +122,14 @@ function createTvRouter({ db, state, commands, hub, screenshots, log = () => {} 
     if (cid && commands) commands.ack(set.id, cid, true, { file: path.basename(file), bytes: buf.length });
     log(`${req.tenant.name}: screenshot from set ${set.id} (${buf.length} bytes)`);
     res.json({ ok: true, bytes: buf.length });
+  });
+
+  // GET /api/tv/weather?set_id&token — current conditions for the tenant's configured location.
+  router.get('/weather', async (req, res) => {
+    const set = authSet(req, res); if (!set) return;
+    if (!weather) return res.json({ ok: false, reason: 'weather not configured' });
+    let settings = {}; try { settings = JSON.parse(req.tenant.settings_json || '{}') || {}; } catch { /* ignore */ }
+    res.json(await weather.get(settings));
   });
 
   return router;

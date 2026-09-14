@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { get } from '../api.js';
 import { Field } from '../components/ui.jsx';
 import { ZONE_TYPES, ACTIONS, KEY_NAMES, updateZone, renameZone, removeZone, moveZoneOrder, duplicateZone, toggleZoneInScreen, addScreen, removeScreen } from './geometry.js';
 
@@ -47,6 +48,8 @@ function ListEditor({ items, onChange, fields, addLabel }) {
 export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenId, setScreenId }) {
   const zone = doc.zones.find((z) => z.id === selectedId);
   const [newScreen, setNewScreen] = useState('');
+  const [assetList, setAssetList] = useState([]);
+  useEffect(() => { if (zone && zone.type === 'image') get('/assets').then(setAssetList, () => setAssetList([])); }, [zone && zone.type]); // eslint-disable-line
   const canvas = doc.canvas || {};
   const setZ = (patch) => onChange(updateZone(doc, zone.id, patch));
   const setStyle = (style) => setZ({ style });
@@ -110,7 +113,8 @@ export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenI
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontSize', 'color', 'background', 'align', 'fontWeight', 'padding', 'borderRadius', 'opacity']} />
       </>}
       {zone.type === 'image' && <>
-        <Field label="Image URL" hint="Upload logos under Tenant settings; they live in /procentric/application/assets/."><input value={zone.src || ''} onChange={(e) => setZ({ src: e.target.value })} aria-label="Image URL" /></Field>
+        <Field label="Image URL" hint="Upload images under Settings → Assets. {{logo}} = the tenant logo."><input value={zone.src || ''} onChange={(e) => setZ({ src: e.target.value })} aria-label="Image URL" /></Field>
+        {assetList.length > 0 && <Field label="Pick an uploaded asset"><select value="" onChange={(e) => { if (e.target.value) setZ({ src: e.target.value }); }} aria-label="Asset picker"><option value="">—</option><option value="{{logo}}">tenant logo</option>{assetList.map((a) => <option key={a.name} value={a.url}>{a.name}</option>)}</select></Field>}
         <Field label="Fit"><select value={zone.fit || 'contain'} onChange={(e) => setZ({ fit: e.target.value })}><option>contain</option><option>cover</option><option>fill</option></select></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['background', 'borderRadius', 'opacity']} />
       </>}

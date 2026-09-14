@@ -286,32 +286,13 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     res.json({ ok: true, pushed });
   });
 
-  // ---------------------------------------------------------------- tenant (minimal; settings page in step 5)
-  r.get('/tenant', (req, res) => res.json(publicTenant(req.tenant)));
-  r.patch('/tenant', (req, res) => {
-    const b = req.body || {};
-    if ('default_layout_id' in b) {
-      if (b.default_layout_id != null && !qLayout.get(Number(b.default_layout_id), req.tenant.id)) return res.status(400).json({ error: 'unknown layout' });
-      db.prepare('UPDATE tenants SET default_layout_id = ? WHERE id = ?').run(b.default_layout_id == null ? null : Number(b.default_layout_id), req.tenant.id);
-    }
-    if ('default_lineup_id' in b) {
-      if (b.default_lineup_id != null && !db.prepare('SELECT id FROM lineups WHERE id = ? AND tenant_id = ?').get(Number(b.default_lineup_id), req.tenant.id)) return res.status(400).json({ error: 'unknown lineup' });
-      db.prepare('UPDATE tenants SET default_lineup_id = ? WHERE id = ?').run(b.default_lineup_id == null ? null : Number(b.default_lineup_id), req.tenant.id);
-    }
-    if ('display_name' in b) {
-      const v = String(b.display_name || '').trim().slice(0, 80);
-      if (v) db.prepare('UPDATE tenants SET display_name = ? WHERE id = ?').run(v, req.tenant.id);
-    }
-    hub.refresh(req.tenant.id);
-    res.json(publicTenant(db.prepare('SELECT * FROM tenants WHERE id = ?').get(req.tenant.id)));
-  });
-
   function state(req) { return req.app.locals.state; }
   function hasColumn(table, col) { return db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col); }
   return r;
 }
 
-function publicTenant(t) { return { id: t.id, name: t.name, hostname: t.hostname, display_name: t.display_name, default_layout_id: t.default_layout_id, default_lineup_id: t.default_lineup_id }; }
+function publicTenant(t) { let settings = {}; try { settings = JSON.parse(t.settings_json || '{}') || {}; } catch { /* ignore */ }
+  return { id: t.id, name: t.name, hostname: t.hostname, display_name: t.display_name, default_layout_id: t.default_layout_id, default_lineup_id: t.default_lineup_id, settings }; }
 function safe(s, fb = null) { try { return s == null ? fb : JSON.parse(s); } catch { return fb; } }
 function str(v, max) { if (v == null) return null; const s = String(v).trim().slice(0, max); return s || null; }
 

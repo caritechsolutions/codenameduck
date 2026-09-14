@@ -108,7 +108,7 @@ function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.cl
 
 var RENDERERS = {
   text: function (e, z, ctx) { e.textContent = substitute(z.text, ctx); },
-  image: function (e, z) { var img = document.createElement('img'); img.src = z.src || ''; img.alt = ''; if (z.fit) img.style.objectFit = z.fit; e.appendChild(img); },
+  image: function (e, z, ctx) { var img = document.createElement('img'); img.src = substitute(z.src || '', ctx); img.alt = ''; if (z.fit) img.style.objectFit = z.fit; e.appendChild(img); },
   clock: function (e, z) { e.setAttribute('data-clock', z.format || 'HH:mm'); e.textContent = formatClock(z.format, new Date()); },
   video: function (e, z) {
     // The TV video plane shows through this transparent "hole" (LG: background-image url('TV:')).
@@ -119,7 +119,7 @@ var RENDERERS = {
   channel_list: function (e, z) { e.setAttribute('data-chlist', '1'); renderChannelList(e, z); },
   menu: function (e, z) { e.setAttribute('data-menu', '1'); renderMenu(e, z); },
   html: function (e, z) { e.innerHTML = z.html || ''; },
-  weather: function (e, z) { e.textContent = ''; e.className += ' pending'; },      // step 5
+  weather: function (e, z) { e.setAttribute('data-weather', '1'); renderWeather(e, z); },
   app_launcher: function (e, z) { renderMenu(e, { items: (z.apps || []).map(function (a) { return { label: a.label, action: 'launch_app', app_id: a.app_id }; }), style: z.style }); e.setAttribute('data-menu', '1'); }
 };
 
@@ -152,6 +152,32 @@ function renderMenu(e, z) {
     if (i === focused && z.style && z.style.highlight) { row.style.background = z.style.highlight; row.style.color = z.style.highlightText || '#1a1a1a'; }
     e.appendChild(row);
   });
+}
+function renderWeather(e, z) {
+  var w = state.weather;
+  var st = z.style || {};
+  while (e.firstChild) e.removeChild(e.firstChild);
+  if (!w || !w.ok) { e.appendChild(el('span', 'wx-na', w && w.reason ? '' : '…')); return; }
+  var imperial = (z.units || state.context.units) === 'imperial';
+  var wrap = el('div', 'wx');
+  wrap.appendChild(el('span', 'wx-icon', w.icon || ''));
+  wrap.appendChild(el('span', 'wx-temp', (imperial ? w.temp_f + '°F' : w.temp_c + '°C')));
+  if (z.showText !== false) wrap.appendChild(el('span', 'wx-text', w.text || ''));
+  if (st.align === 'right') wrap.style.justifyContent = 'flex-end';
+  if (st.align === 'center') wrap.style.justifyContent = 'center';
+  e.appendChild(wrap);
+}
+function refreshWeather() {
+  if (!state.setId) return;
+  request('GET', '/api/tv/weather' + authQs()).then(function (w) {
+    state.weather = w;
+    var els = stage.querySelectorAll('[data-weather]');
+    for (var i = 0; i < els.length; i++) {
+      var id = els[i].id.replace('zone-', '');
+      var z = ((state.layout && state.layout.zones) || []).filter(function (x) { return x.id === id; })[0];
+      if (z) renderWeather(els[i], z);
+    }
+  }, function (err) { log('weather: ' + err.message); });
 }
 function tickClocks() {
   var els = stage.querySelectorAll('[data-clock]');
@@ -481,7 +507,14 @@ function runCommand(cmd, ack) {
       case 'message': showMessage(p.text || '', p.ttl_s != null ? Number(p.ttl_s) : 30); r = Promise.resolve({ shown: true }); break;
       case 'toast': r = tv.toast(p.text || '').then(function () { return { shown: true }; }); break;
       case 'screenshot': r = uploadScreenshot(cmd.id); break;
-      case 'checkout': r = tv.checkout().then(function () { try { localStorage.clear(); } catch (e) {} return { checkout: true }; }); break;
+      case 'checkout':
+        r = tv.checkout().then(null, function (e) { log('platform checkout failed: ' + e.message); }).then(function () {
+          try { localStorage.clear(); } catch (e) {}
+          state.lastChannel = null; state.prevChannel = null;
+          if (p.message) showMessage(p.message, 20);
+          return { checkout: true };
+        });
+        break;
       case 'launch_app': r = tv.launchApp(p.app_id, p.params).then(function () { return { app_id: p.app_id }; }); break;
       default: r = Promise.reject(new Error('unsupported command ' + cmd.type));
     }
@@ -577,6 +610,9 @@ function registerLoop(attempt) {
     log('registered as set ' + data.set_id + (data.created ? ' (new)' : ''));
     applyState(data);
     schedulePoll();
+    refreshWeather();
+    if (state.weatherTimer) clearInterval(state.weatherTimer);
+    state.weatherTimer = setInterval(refreshWeather, 15 * 60 * 1000);
   }, function (err) {
     var wait = REGISTER_RETRY_MS[Math.min(attempt, REGISTER_RETRY_MS.length - 1)];
     showStatus(true);

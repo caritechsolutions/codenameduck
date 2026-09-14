@@ -12,12 +12,15 @@ const { createHub } = require('./ws');
 const { createCommands } = require('./commands');
 const { createChannelsRouter } = require('./routes/channels');
 const { createScreenshotStore } = require('./screenshots');
+const { createTenantRouter, defaultTenantCommand } = require('./routes/tenant');
+const { createAssetStore } = require('./assets');
+const { createWeather } = require('./weather');
 
 function timestamp() { return new Date().toISOString(); }
 
 // Builds the Express app + HTTP server + WebSocket hub. Returns { app, server, hub, ... }.
 // Tests call this with an in-memory DB and a temp tenants dir.
-function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log }) {
+function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log, weatherFetch = undefined, tenantCommand = defaultTenantCommand }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -35,6 +38,8 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   hub.setCommands(commands);
   app.locals.state = state;
   const screenshots = dataDir ? createScreenshotStore(path.join(dataDir, 'screenshots')) : null;
+  const assets = createAssetStore(tenantsDir);
+  const weather = createWeather({ fetcher: weatherFetch, log: logger });
 
   const seeded = seedSuperadmin(db);
   if (seeded) {
@@ -53,9 +58,10 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
 
   app.use('/api', tenants.middleware);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.use('/api/tv', createTvRouter({ db, state, commands, hub, screenshots, log: logger }));
+  app.use('/api/tv', createTvRouter({ db, state, commands, hub, screenshots, weather, log: logger }));
   const admin = createAdminRouter({ db, auth, hub, commands, screenshots, log: logger });
   admin.use(createChannelsRouter({ db, hub, log: logger }));
+  admin.use(createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, auth, tenantCommand, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
@@ -85,7 +91,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
   expireTimer.unref();
 
-  return { app, server, hub, commands, state, auth, tenants, seeded, log: logger };
+  return { app, server, hub, commands, state, auth, tenants, assets, weather, seeded, log: logger };
 }
 
 function escapeHtml(s) {

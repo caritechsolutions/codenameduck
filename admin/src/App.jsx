@@ -10,6 +10,10 @@ import Layouts from './pages/Layouts.jsx';
 import LayoutEdit from './pages/LayoutEdit.jsx';
 import Channels from './pages/Channels.jsx';
 import Lineups from './pages/Lineups.jsx';
+import Messages from './pages/Messages.jsx';
+import Users from './pages/Users.jsx';
+import Settings from './pages/Settings.jsx';
+import Tenants from './pages/Tenants.jsx';
 
 export const SessionCtx = React.createContext(null);
 
@@ -20,7 +24,11 @@ const NAV = [
   ['/layouts', 'Layouts', '▤'],
   ['/channels', 'Channels', '▶'],
   ['/lineups', 'Lineups', '☰'],
+  ['/messages', 'Messages', '✉'],
+  ['/settings', 'Settings', '⚙'],
+  ['/users', 'Users', '☺'],
 ];
+const SUPER_NAV = [['/tenants', 'Tenants', '⌂']];
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = loading, null = logged out
@@ -51,6 +59,7 @@ export default function App() {
             <div className="brand"><div className="logo">C</div><div><b>CoopCentric</b><small>{session.tenant.display_name}</small></div></div>
             <div className="nav">
               {NAV.map(([to, label, icon]) => <NavLink key={to} to={to} end={to === '/'}><span aria-hidden>{icon}</span>{label}</NavLink>)}
+              {session.user.role === 'superadmin' && <><div className="sep" /><div className="label">Superadmin</div>{SUPER_NAV.map(([to, label, icon]) => <NavLink key={to} to={to}><span aria-hidden>{icon}</span>{label}</NavLink>)}</>}
             </div>
             <div className="me"><b>{session.user.username}</b>{session.user.role} · {session.tenant.hostname}<div style={{ marginTop: 8 }}><button className="sm" onClick={logout}>Log out</button></div></div>
           </nav>
@@ -64,6 +73,10 @@ export default function App() {
               <Route path="/layouts/:id" element={<LayoutEdit />} />
               <Route path="/channels" element={<Channels />} />
               <Route path="/lineups" element={<Lineups />} />
+              <Route path="/messages" element={<Messages />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/users" element={<Users />} />
+              {session.user.role === 'superadmin' && <Route path="/tenants" element={<Tenants />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

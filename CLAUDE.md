@@ -206,3 +206,18 @@ Decisions already made (do not re-open):
   `ZonePanel.jsx` = per-type property panel + canvas/screens/key-map panel; `LayoutThumb.jsx`.
   `LayoutEdit.jsx` hosts Canvas/JSON tabs over one document, undo, preview-on-set.
 - Layout list API now returns `json` so thumbnails render.
+
+### Phase 2 step 5 — weather/html/app_launcher, messages, checkout, users, settings, tenants (built 2026-09-14)
+
+- `server/src/weather.js` (Open-Meteo, injectable fetcher, 15 min cache) → `GET /api/tv/weather`
+  and `GET /api/admin/weather`; `assets.js` writes tenant uploads to
+  `tenants/<name>/procentric/application/assets/` (deploy excludes `assets/`); `routes/tenant.js`
+  = tenant settings (`tenants.settings_json`: timezone, weather, logo_url, guest_placeholder,
+  checkout_message), assets, messages (targets set/group/all, expiry, pushed live), checkout
+  (removes set messages + queues `checkout`), users/roles + own password, superadmin tenants
+  (create runs `sudo coopcentric-tenant new`; install.sh writes `/etc/sudoers.d/coopcentric`).
+- TV context now carries `guest` (placeholder until PMS), `logo`, `units`; `{{logo}}` works in
+  image src. Renderer: `weather` zone, persistent message bar, `app_launcher` menu, checkout
+  clears local state and shows the configured message.
+- Admin pages: Messages, Users (+ change my password), Settings (hotel, defaults, weather,
+  logo, assets), Tenants (superadmin). Image zone panel has an asset picker.

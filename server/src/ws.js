@@ -126,21 +126,26 @@ function createHub({ db, tenants, state, log = () => {} }) {
       const set = findSet.get(c.setId, tenantId);
       if (!set) continue;
       const st = state.build(tenant, set);
+      let touched = false;
       const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context);
       if (force || c.sent.layout !== layoutKey) {
         c.sent.layout = layoutKey;
         sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group });
-        pushed++;
+        touched = true;
       }
       const lineupKey = JSON.stringify(st.lineup);
       if (force || c.sent.lineup !== lineupKey) {
         c.sent.lineup = lineupKey;
         sendJson(c.ws, { type: 'lineup', lineup: st.lineup });
+        touched = true;
       }
-      if (st.messages && (force || c.sent.messages !== JSON.stringify(st.messages))) {
-        c.sent.messages = JSON.stringify(st.messages);
-        sendJson(c.ws, { type: 'messages', messages: st.messages });
+      const msgKey = JSON.stringify(st.messages || []);
+      if (force || c.sent.messages !== msgKey) {
+        c.sent.messages = msgKey;
+        sendJson(c.ws, { type: 'messages', messages: st.messages || [] });
+        touched = true;
       }
+      if (touched) pushed++;
     }
     return pushed;
   }

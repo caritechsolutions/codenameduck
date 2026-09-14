@@ -124,8 +124,19 @@ main() {
   # The service runs as www-data and must be able to read the checkout.
   chmod -R a+rX "$HOME_DIR"
 
-  # --- data dir + systemd service ------------------------------------------------------------
+  # --- data dir + sudo rule + systemd service --------------------------------------------------
   install -d -m 0750 -o www-data -g www-data "$ROOT_DIR/data"
+  # The admin's superadmin "Tenants" page creates tenants by running the same CLI as root.
+  local sudoers=/etc/sudoers.d/coopcentric tmp_sudo
+  tmp_sudo="$(mktemp)"
+  printf 'www-data ALL=(root) NOPASSWD:SETENV: %s/coopcentric-tenant\n' "$BIN_DIR" > "$tmp_sudo"
+  if command -v visudo >/dev/null 2>&1 && visudo -cf "$tmp_sudo" >/dev/null 2>&1; then
+    install -m 0440 -o root -g root "$tmp_sudo" "$sudoers"
+    log "installed $sudoers (www-data may run coopcentric-tenant as root)"
+  else
+    warn "visudo check failed or missing; not installing $sudoers (tenant creation from admin will fail)"
+  fi
+  rm -f "$tmp_sudo"
   if [ -d /run/systemd/system ]; then
     install -m 0644 "$HOME_DIR/systemd/$SERVICE.service" "/etc/systemd/system/$SERVICE.service"
     systemctl daemon-reload

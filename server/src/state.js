@@ -16,6 +16,10 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
     WHERE li.lineup_id = ? AND c.enabled = 1 ORDER BY li.position`);
   const groupLineup = db.prepare('SELECT lineup_id FROM lineup_assign WHERE group_id = ?');
   const lineupExists = db.prepare('SELECT id FROM lineups WHERE id = ? AND tenant_id = ?');
+  const activeMessages = db.prepare(`SELECT id, text, created_at, expires_at FROM messages
+    WHERE tenant_id = @tenant_id AND (expires_at IS NULL OR expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      AND (target_type = 'all' OR (target_type = 'set' AND target_id = @set_id) OR (target_type = 'group' AND target_id = @group_id))
+    ORDER BY id DESC LIMIT 5`);
 
   // Lineup precedence mirrors layouts: per-set override → group → tenant default → none.
   function resolveLineup(tenant, set) {
@@ -27,8 +31,11 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
     return { id, channels: lineupItems.all(id).map(channelToApi) };
   }
 
+  function settingsOf(tenant) { try { return JSON.parse(tenant.settings_json || '{}') || {}; } catch { return {}; } }
   function context(tenant, set) {
-    return { hotel: tenant.display_name || tenant.name, room: set.room_number || '', guest: '', serial: set.serial };
+    const st = settingsOf(tenant);
+    return { hotel: tenant.display_name || tenant.name, room: set.room_number || '', guest: st.guest_placeholder || '', serial: set.serial,
+      logo: st.logo_url || '', units: (st.weather && st.weather.units) || 'metric' };
   }
 
   function commandsFor(set) {
@@ -47,7 +54,7 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
       layout: resolveLayout(tenant, set),
       lineup: lineup.channels,
       lineup_id: lineup.id,
-      messages: [],          // step 5
+      messages: activeMessages.all({ tenant_id: tenant.id, set_id: set.id, group_id: set.group_id || -1 }),
       commands: commandsFor(set),
       ws_url: '/ws/tv',
       poll_interval_s: pollIntervalS,

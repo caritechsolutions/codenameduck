@@ -82,3 +82,27 @@ Prerequisite: an IP multicast (or HLS URL) stream reachable from the TV's networ
    permanent, or reload the page to discard (the TV falls back on its next real update).
 6. **JSON** tab shows the same document; a change there is reflected on the canvas and vice
    versa. Ctrl+Z undoes canvas edits; Delete removes the selected zone.
+
+## Step 5 — weather, messages, checkout, users, settings, tenants
+
+1. **Settings**: set hotel name, latitude/longitude, click "Check weather now" (server fetches
+   Open-Meteo). Upload a logo. Save.
+2. **Layouts** → add a `weather` zone and an `image` zone with src `{{logo}}`. Save & publish.
+   TV shows "☀ 24°C Clear" and the logo. (Weather refreshes every 15 min on the TV.)
+3. **Messages** → send "Pool closed today" to all sets, 60 min. TV shows a red bar at the
+   bottom immediately; "Take down" removes it immediately. Send one to the set's group and one
+   to the set only; the most recent one shows.
+4. **Set drawer → Checkout**: confirm. The TV runs LG checkout (`tv/checkout/request`) — LG
+   recommends a reboot afterwards; watch whether the set reboots itself or needs "Reboot TV".
+   The set-targeted message disappears; the command shows `acked`; if a checkout message is
+   configured in Settings it appears for 20 s.
+5. **Users**: create a tenant-admin, log in as them in a private window: same pages, no
+   "Tenants" entry, cannot see other tenants' users. Change your own password from the Users
+   page; the seeded `admin` password from the journal should now be changed.
+6. **Tenants** (superadmin): create a test tenant (e.g. `hotelb` / `hotelb.caritech.net`). The
+   server runs `sudo coopcentric-tenant new` (install.sh added /etc/sudoers.d/coopcentric). The
+   output appears below the table; `coopcentric-tenant list` on the VM shows it; its /admin
+   answers once DNS points at the VM. If it fails with a sudo error, send me the output.
+7. **Channels → Import CSV**: Export first, edit, import — existing numbers update, new ones
+   are created, bad lines are reported.
+8. Re-run `install.sh`: uploaded logo/assets must survive (deploy excludes `assets/`).

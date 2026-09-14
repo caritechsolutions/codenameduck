@@ -114,3 +114,18 @@ First tenant already exists by hand on the VM: name `hoteldemo`, host `hoteldemo
 - No secrets in the repo. Tenant hostnames are fine.
 - LG API references: `docs/` holds text extracts of the LG doc pages we've read; the full
   HTML API references are in Richard's downloaded library packages (not committed).
+
+
+## Phase 2 — the platform (added 2026-09-14)
+
+Phase 1 is done and verified on a real set (43UM670H0UA, webOS 8.3.0, IDPN 306).
+The full platform spec is in `docs/PLATFORM.md` — read it before any Phase 2 work.
+`docs/idcap-api-index.md` lists every IDCAP endpoint with a one-line description.
+
+Decisions already made (do not re-open):
+- Node.js 20 + Express + better-sqlite3 + ws; admin UI = Vite + React under /admin;
+  TV renderer = vanilla JS bundled by esbuild (target es2015).
+- Sets are keyed by serial number; room number and group are assigned in admin; layouts and
+  channel lineups are assigned to groups with per-set override.
+- IP channels now, RF channel types modelled in the schema from day one.
+- Follow the build order in PLATFORM.md; each step must end with something testable on the TV.

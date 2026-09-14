@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CoopCentric probe</title>
+<script src="./lib/hcap.js"></script>
+<script src="./lib/idcap.js"></script>
+<style>
+  html,body{margin:0;background:#101820;color:#f2f2f2;font-family:sans-serif}
+  body{padding:60px 80px}
+  h1{font-size:48px;margin:0 0 30px}
+  #api{font-size:36px;color:#ffd166;margin-bottom:30px}
+  table{font-size:30px;border-collapse:collapse}
+  td{padding:8px 40px 8px 0;vertical-align:top}
+  td:first-child{color:#8fb3c9}
+  #log{margin-top:40px;font-size:20px;color:#888;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<h1>CoopCentric probe — hoteldemo</h1>
+<div id="api">Detecting platform…</div>
+<table id="props"></table>
+<div id="log"></div>
+<script>
+var KEYS = ["model_name","serial_number","platform_version","firmware_version","webos_version","idpn",
+            "idcap_js_extension_version","hcap_js_extension_version","hcap_middleware_version"];
+function log(s){ document.getElementById("log").textContent += s + "\n"; console.log(s); }
+function row(k,v){ var r=document.getElementById("props").insertRow(); r.insertCell().textContent=k; r.insertCell().textContent=v; }
+
+function probeIdcap(ok, fail){
+  if (typeof idcap === "undefined") { fail("idcap.js not loaded"); return; }
+  var done=false;
+  var t=setTimeout(function(){ if(!done){done=true; fail("idcap timeout (no middleware response)");} },4000);
+  idcap.request("idcap://configuration/property/get",{
+    parameters:{key:"idpn"},
+    onSuccess:function(cb){ if(done)return; done=true; clearTimeout(t); ok(cb); },
+    onFailure:function(e){ if(done)return; done=true; clearTimeout(t); fail("idcap error: "+(e&&e.errorMessage)); }
+  });
+}
+function idcapGet(key){ return new Promise(function(res){
+  idcap.request("idcap://configuration/property/get",{parameters:{key:key},
+    onSuccess:function(cb){ res(cb.value!==undefined?cb.value:JSON.stringify(cb)); },
+    onFailure:function(e){ res("— ("+(e&&e.errorMessage)+")"); }}); });}
+function hcapGet(key){ return new Promise(function(res){
+  hcap.property.getProperty({key:key,
+    onSuccess:function(s){ res(s.value); },
+    onFailure:function(f){ res("— ("+(f&&f.errorMessage)+")"); }}); });}
+
+function dump(getter, keys){
+  var p=Promise.resolve();
+  keys.forEach(function(k){ p=p.then(function(){ return getter(k).then(function(v){ row(k,v); }); }); });
+  return p;
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  log("hcap.js " + (typeof hcap!=="undefined"?hcap.API_VERSION:"missing") +
+      " / idcap.js " + (typeof idcap!=="undefined"?idcap.API_VERSION:"missing"));
+  probeIdcap(function(cb){
+    document.getElementById("api").textContent = "IDCAP path (IDPN " + (cb.value||JSON.stringify(cb)) + ")";
+    dump(idcapGet, KEYS);
+  }, function(reason){
+    log(reason + " → trying HCAP");
+    if (typeof hcap==="undefined"){ document.getElementById("api").textContent="Neither library available"; return; }
+    var done=false;
+    var t=setTimeout(function(){ if(!done){done=true; document.getElementById("api").textContent="HCAP timeout — no middleware response";} },4000);
+    hcap.property.getProperty({key:"model_name",
+      onSuccess:function(s){ if(done)return; done=true; clearTimeout(t);
+        document.getElementById("api").textContent="HCAP path (" + s.value + ")";
+        dump(hcapGet, KEYS); },
+      onFailure:function(f){ if(done)return; done=true; clearTimeout(t);
+        document.getElementById("api").textContent="HCAP error: "+(f&&f.errorMessage); }});
+  });
+});
+</script>
+</body>
+</html>

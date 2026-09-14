@@ -1,0 +1,55 @@
+<!--
+ *  Copyright (c) 2020 The LG Electronics. All Rights Reserved.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample App</title>  
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+    <script src="./js/idcap.js"></script>    
+    <script src = "./js/main.js"></script>
+    <script src = "./js/tvLayer.js"></script>
+
+</head>
+
+<body onload="run()">
+    <img id = "logoImg" src = "content/logo.png">
+    <div id = "mainContainer">
+        <p id = "title">Press each number of RCU button </p>
+        <div id = "subContainer">
+            <div>
+                <p>[0] Set HCAP Mode 0 (Hide App Layer)
+             </div>
+            <div>
+                <p>[Guide] Set HCAP Mode 1(Show App Layer)
+            </div>
+            <div>
+                <p>[1] Hiding App Layer by using CSS property
+            </div>
+            <div>
+                <p>[2] Showing App Layer by using CSS property
+            </div>
+            <div>
+                <p>[3] Hiding by using hcap.video.setosdTransparencyLevel ()
+            </div>
+            <div>
+                <p>[4] Showing by using hcap.video.setosdTransparencyLevel ()
+            </div>
+            <div>
+                <p>[5] Showing PIP
+            </div>
+            <div>
+                <p>[6] No PIP
+            </div>
+        </div> 
+    </div>
+    
+    <p id = "log_area"></p>
+    <div id="videoChannelLG" style="height: 218px; left: 550px; position: absolute; top: 442px; width: 379px;"></div>
+</body>
+</html>
+

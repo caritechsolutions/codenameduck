@@ -1,0 +1,116 @@
+<html>
+
+<head>
+    <title>Pro:Centric Sample application</title>
+    
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <script src='./idcap.js'></script>
+    <script src='./script.js'></script>
+
+    <script>
+    function run() {
+        window.setTimeout("initialize()", 2000);
+    }
+
+    function initialize() {
+        try {
+            setDebugMode();
+            setChannelFloatingUI();
+            set_boot_sequence_option();
+            console.log("initialize completed!");
+        }
+        catch (e) {
+            console.log("Initialize Error: " + e.message);
+        }
+    }
+
+    function setDebugMode() {
+        idcap.request( "idcap://configuration/property/set" , {
+            "parameters": {
+                "key" : "browser_debug_mode",
+                "value" : "1"
+            },
+            "onSuccess": function () {
+                console.log("#Success to set browser debug mode");
+            },
+            "onFailure": function (f) {
+                console.log("#Fail to set browser debug mode(errorMessage = " + f.errorMessage + ")");
+            }
+        });
+    }
+
+    function setChannelFloatingUI() {
+        idcap.request( "idcap://configuration/property/set" , {
+            "parameters": {
+                "key" : "tv_channel_attribute_floating_ui",
+                "value" : "0"
+            },
+            "onSuccess": function () {
+                console.log("#Success to set Channel Floating UI");
+            },
+            "onFailure": function (f) {
+                console.log("#Fail to set Channel Floating UI(errorMessage = " + f.errorMessage + ")");
+            }
+        });
+    }
+
+    function set_boot_sequence_option() {
+        idcap.request( "idcap://configuration/property/set" , {
+            "parameters": {
+                "key" : "boot_sequence_option",
+                "value" : "1"
+            },
+            "onSuccess": function () {
+                console.log("#Success to set boot_sequence_option");
+            },
+            "onFailure": function (f) {
+                console.log("#Fail to set boot_sequence_option(errorMessage = " + f.errorMessage + ")");
+            }
+        });
+    }
+
+    function reload(){
+        document.location.reload(true);
+    }
+
+    function reboot() {
+        idcap.request( "idcap://power/command" , {
+            "parameters": {
+                "powerCommand" : "reboot"
+            },
+            "onSuccess": function () {
+                console.log("Success to reboot");
+            },
+            "onFailure": function (err) {
+                console.log("Fail to reboot : " + err.errorMessage);
+            }
+        });
+    }
+    </script>
+</head>
+
+<body onload="run()">
+    <span id='title'>Pro:Centric Sample application</span>
+    <hr>
+    <p class = "inlineClass logTitle"><b> Press digit button on remote or click a button:</b></p>
+        <button type="button" class="inlineClass reload_btn btn btn-lg" onclick="reload()">Reload</button>
+        <button type="button" class="inlineClass reboot_btn btn btn-lg" onclick="reboot()">Reboot</button>
+    <ol>
+        
+        <li>Channel and Media(VOD)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "location.href = './Apps/player_sample/player_sample.html';">Click</button></li>
+        
+        <li>Media(Video tag)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "location.href = './Apps/videotag_sample/simpleVideo.html';">Click</button></li>
+
+    </ol>
+    <div id="inputs"></div>
+      <p type="text" id="logMsg"></p>
+</body>
+
+</html>

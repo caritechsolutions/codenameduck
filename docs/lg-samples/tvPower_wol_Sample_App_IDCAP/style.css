@@ -1,0 +1,65 @@
+
+        body{
+            background-color: white;
+            font-family: 'Rubik', sans-serif;
+        }
+        #logoImg{
+            position: absolute;
+            left: 1vw;
+            top: 1vh;
+            width: 20vw;
+        }
+        #log_area{
+            font-size: 12px;
+            position: absolute;
+            right: 0px;
+            top: 0px;
+            width: 25vw;
+            padding: 10px;
+            height: 100%;
+            background-color: #dbdad7;
+        }
+        #mainContainer{
+            position:absolute;
+            left: 1vw;
+            top: 10vh;
+            width: 72vw;
+            height: 85vh;
+            background-color: rgb(255,243,205);
+            padding: 20px;
+            margin: 20px;
+            border-radius: 20px;
+        }
+        #title{
+            font-size: 30px;
+        }
+        #menuInfo{
+            font-size: 14px;
+        }
+        #subTitle{
+            padding-left: 30px;
+            font-size: 15px;
+        }
+        #subContainer{
+            font-size: 20px;
+            background-color: rgb(255,217,102);
+            border-radius: 5px;
+            padding:10px;
+            margin:10px;
+            border-radius: 30px;
+        }
+        #precondition{
+            color:red;
+        }
+        .detail{
+            font-size: 13px;
+            padding-top:0px !important;
+            padding-left:30px;
+        }
+        #autoSequence{
+            position:absolute;
+            left : 36vw;
+            top : 20vh;
+            color: #89690b;
+            font-size: 15px;
+        }

@@ -1,0 +1,135 @@
+* {
+    font-size: 30px;
+}
+
+body {
+    background-color: #FFFFFF;
+}
+
+span#title {
+    font-size:50px;
+}
+
+ol {
+    font-size:30px;
+}
+  
+  #logs {
+    margin: 5px;
+    padding: 5px;
+  }
+  
+  #button {
+    padding: 5px;
+    margin: 5px;
+  }
+  
+  .menu_btn {
+    font-size: 15px;
+    width: 100px;
+    margin: 3px;
+    padding: 3px;
+    background-color: #d9534f;
+    color: white;
+  }
+  
+  .function_btn {
+    margin: 3px;
+    padding: 3px;
+    background-color: #d1c7c7;
+    font-size: 12px;
+  }
+  
+  .clear_btn {
+    font-size: 14px;
+    width: 70px;
+    padding: 2px;
+    background-color: #5B5853;
+    color: white;
+  }
+  .reload_btn {  
+    font-size: 14px;
+    width: 70px;
+    padding: 2px;
+    background-color: green;
+    color: white;
+  }
+  .reboot_btn {
+    font-size: 14px;
+    width: 70px;
+    padding: 2px;
+    background-color:red;
+    color: white;
+  }
+  
+  .logTitle {
+    font-size: 20px;
+  }
+  
+  #info {
+    font-size: 8px;
+    color: gray;
+  }
+  
+  .inlineClass{
+    display: inline-block;
+    margin-left : 7px;
+  }
+  
+  pre {
+    font-size : 11px;
+    overflow:scroll; 
+    width:100%; 
+    height:200px;
+  }
+  
+  .preCondition{ 
+    color:green;
+    margin : 0px;
+    padding : 0px;
+    
+  } 
+  
+  #logMsg{
+    font-size : 11px;
+  }
+  
+  #video_div{
+    width: 500px;
+    height: 300px;
+  }
+  .loader {
+    border: 16px solid #f3f3f3; 
+    border-top: 16px solid #d9534f; 
+    border-radius: 50%;
+    width: 120px;
+    height: 120px;
+    animation: spin 2s linear infinite;
+    position : absolute;
+    top: 300px;
+    left: 550px;  
+  }
+  
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  #iot_event_title {
+      position: absolute;
+      top: 25%;
+      left: 70%;
+      display : none;
+  }
+  
+  #iot_event_div {
+      position: absolute;
+      width: 25%;
+      height: 60%;
+      top: 32%;
+      left: 70%;
+      background-color : #f5f5f5;
+      overflow-y : scroll;
+      display: none;
+  }
+

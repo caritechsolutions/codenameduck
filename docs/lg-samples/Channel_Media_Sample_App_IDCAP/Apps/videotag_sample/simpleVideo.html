@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="./idcap.js"></script>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial;
+  font-size: 17px;
+}
+
+#myVideo {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  min-width: 100%; 
+  min-height: 100%;
+}
+
+.content {
+  position: fixed;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  color: #f1f1f1;
+  width: 100%;
+  padding: 20px;
+}
+
+#myBtn {
+  width: 200px;
+  font-size: 18px;
+  padding: 10px;
+  border: none;
+  background: #000;
+  color: #fff;
+  cursor: pointer;
+}
+
+#myBtn:hover {
+  background: #ddd;
+  color: black;
+}
+
+#log_area
+{
+	position: absolute;
+	width: 320px;
+	bottom: 10px;
+	right: 10px;
+	padding: 10px;
+
+	color: yellow;
+	font-size: 9pt;
+	background-color: rgba(0, 0, 128, 0.8);
+}
+
+img {
+    position: absolute;
+    left: 0px;
+    top: 0px;
+    z-index: -1;
+}
+</style>
+<script>
+var gAppStartTime = (new Date()).getTime();
+
+function run(){
+    btn.focus();
+}
+
+document.addEventListener("keydown",
+    function (e) {
+
+        log("[dawn7dew] key_code = " + e.keyCode);
+        switch (e.keyCode) {
+            case 406:// Remote controller Blue
+                document.location.reload(true);
+                break;
+            case hcap.key.Code.EXIT:
+            location.href = '../../index.html';
+                break;
+        }
+        
+    },
+false);
+
+function hcap_mediaStart() {
+  idcap.request("idcap://tv/media/startup" , {
+      "parameters": {},
+      "onSuccess" : function(s) {
+          log("[1] Startup");
+      },
+      "onFailure" : function(f) {
+          log("onFailure : errorMessage = " + f.errorMessage);
+      }
+  });
+}
+
+function hcap_mediaEnd() {
+  idcap.request("idcap://tv/media/shutdown" , {
+        "onSuccess": function (s) {
+            log("[3] Shutdown");
+        },
+        "onFailure": function (f) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+function log(msg)
+{
+    var logArea = document.getElementById('log_area');
+    var now = new Date();
+    var timeFromStart = new Number((now.getTime() - gAppStartTime) / 1000);
+
+    if (null === logArea) {
+        //  Add a DOM element to dump logs
+        document.body.insertAdjacentHTML('beforeEnd', '<div id="log_area"></div>');
+
+        logArea = document.getElementById('log_area');
+    }
+
+    logArea.innerHTML += ('[' + timeFromStart.toFixed(3) + '][' + now.toLocaleTimeString() + '] ' + msg + '<br/>');
+}
+</script>
+</head>
+<body onload="run()">
+
+<video id="myVideo" src="">
+  Your browser does not support HTML5 video.
+</video>
+
+<div class="content">
+  <h1>Video Play or Stop : OK button</h1>
+  <p>Sample App Video tag</p>
+  <button id="myBtn" onclick="myFunction()">Status:Stop</button>
+  <button type="button" onclick="location.href = '../../index.html';">Exit</button>
+</div>
+
+<script>
+
+var video = document.getElementById("myVideo");
+var btn = document.getElementById("myBtn");
+
+//Play-Pause of HTML video tag's video.
+function myFunction() {
+  log("video.paused: "+video.paused);
+  if (video.paused) {
+    hcap_mediaStart(); //calling hcap.Media.startUp before video.play();
+    videoPlay();
+  } else {
+    videoStop();
+    hcap_mediaEnd(); //calling hcap.Media.shutDown after video.pause();
+    
+  }
+}
+
+function videoPlay() {
+    video.src ="http://192.168.0.5:8080/procentric/application/sample/AOA_Dance_Practice.mp4";
+    video.play();
+    btn.innerHTML = "Status:Play";
+}
+
+function videoStop() {
+    video.pause();
+    btn.innerHTML = "Status:Stop";
+}
+
+
+</script>
+
+</body>
+</html>

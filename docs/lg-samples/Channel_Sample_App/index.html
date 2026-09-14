@@ -1,0 +1,62 @@
+<!--
+ *  Copyright (c) 2020 The LG Electronics. All Rights Reserved.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sample App</title>  
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;800&display=swap" rel="stylesheet">
+  
+    <script src="./js/hcap.js"></script>    
+    <script src = "./js/main.js"></script>
+    <script src = "./js/channel.js"></script>
+</head>
+
+<body onload="run()">
+    <img id = "logoImg" src = "content/logo.png">
+    <div id = "mainContainer">
+        <p id = "title">Press RCU button and try <b>Channel</b></p>        
+        
+        <div id = "subContainer">
+            <div>
+                <p>[0] Clear logs.
+            </div>
+            <div>
+                <p>[1] Play IP channel streaming udp://239.1.1.1:8208
+            </div>
+            <div>
+                <p>[2] Play IP channel streaming udp://239.1.1.2:8208
+            </div>
+            <div>
+                <p>[3] Play dvb channel
+            </div>
+            <div>
+                <p>[4] get Current Channel
+            </div>
+            <div>
+                <p>[5] Stop current channel 
+            </div>
+            <div>
+                <p>[6] replay Current Channel
+            </div>
+            <div>
+                <p>[7] getCurrentChannelAudioLanguageList
+            </div>
+            <div>
+                <p>[8] getCurrentChannelSubtitleList
+            </div>
+            <div>
+                <p>[9] channel_up_down_KEY
+            </div>
+        </div>
+               
+    </div>
+    <p id = "log_area"></p>
+    <div id="videoChannelLG" style="background-image: url(tv:); height: 218px; left: 500px; position: absolute; top: 350px; width: 379px;"></div>
+</body>
+</html>
+

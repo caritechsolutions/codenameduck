@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+<link rel="stylesheet" href="style.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+<script type="text/javascript" src="idcap.js"></script>
+<script type="text/javascript">
+
+var _stateMedia = null;
+var _media = null;
+var _media_status = 0; //stop
+var current_pipeline = 0;
+
+function log(msg) {
+
+    var dateNow = new Date();
+
+    var hours = dateNow.getHours();
+    var minutes = dateNow.getMinutes();
+    var seconds = dateNow.getSeconds();
+
+    if (hours < 10) {
+        hours = "0" + hours;
+    }
+    if (minutes < 10) {
+        minutes = "0" + minutes;
+    }
+    if (seconds < 10) {
+        seconds = "0" + seconds;
+    }
+
+    var content = hours + ":" + minutes + ":" + seconds + "->" + msg + "<br>" + document.getElementById("logMessage").innerHTML;
+
+    document.getElementById("logMessage").innerHTML = content;
+}
+
+//Do each demo item on the app.
+function select(option)
+{
+    switch (option) {
+        case 1:
+        if(current_pipeline)//Media playing previously
+            {
+                current_pipeline = 0;
+                shutDown();
+		        setTimeout(playIPChannel,500,"239.1.1.1", 8208); //It needs some time to play next video after hcap.Media.shutDown
+            }
+            else
+            {
+                playIPChannel("239.1.1.1", 8208);
+            }
+            break;
+        case 2:
+        if(current_pipeline)
+        {
+            current_pipeline = 0;
+            shutDown();
+            setTimeout(playIPChannel,500,"239.1.1.2", 8208);
+        }
+        else
+        {
+            playIPChannel("239.1.1.2", 8208);
+        }
+        break;
+        case 3:
+            if(current_pipeline)          
+            {
+                playMedia("http://192.168.0.5:8080/procentric/application/sample/AOA_Dance_Practice.mp4", 'video/mp4');       //playMedia() doesn't have hcap.Media.startUp.
+            }
+            else
+            {
+                current_pipeline = 1;
+                playVOD("http://192.168.0.5:8080/procentric/application/sample/AOA_Dance_Practice.mp4", 'video/mp4');          //playVOD() havs hcap.Media.startUp.
+            }
+            break;
+        case 4:
+            if(current_pipeline)
+            {
+                playMedia("http://192.168.0.5:8080/procentric/application/sample/video-auto-rotate.mp4"); 
+            }
+            else
+            {
+                current_pipeline = 1;
+                playVOD("http://192.168.0.5:8080/procentric/application/sample/video-auto-rotate.mp4");
+            }
+            break;
+        case 5:
+            if(current_pipeline)
+            {
+                playMedia("https://anyHLS_url_available_ontheinternet.m3u8", 
+                'application/x-mpegURL');
+            }
+            else
+            {
+                current_pipeline = 1;
+                playVOD("https://anyHLS_url_available_ontheinternet.m3u8",
+                'application/x-mpegURL');
+            }
+            break;
+    }
+}
+
+idcap.key = {};
+idcap.key.Code = {
+    NUM_0: 0x0030,  /* Number 0 key.     */
+    NUM_1: 0x0031,  /* Number 1 key.     */
+    NUM_2: 0x0032,  /* Number 2 key.     */
+    NUM_3: 0x0033,  /* Number 3 key.     */
+    NUM_4: 0x0034,  /* Number 4 key.     */
+    NUM_5: 0x0035,  /* Number 5 key.     */
+    NUM_6: 0x0036,  /* Number 6 key.     */
+    NUM_7: 0x0037,  /* Number 7 key.     */
+    NUM_8: 0x0038,  /* Number 8 key.     */
+    NUM_9: 0x0039,  /* Number 9 key.     */
+    CH_UP: 0x01AB,  /* Channel up key.     */
+    CH_DOWN: 0x01AC,    /* Channel down key.     */
+    GUIDE: 0x01CA,  /* Guide key.     */
+    INFO: 0x01C9,   /* Info key.     */
+    LEFT: 0x0025,   /* Left arrow key.     */
+    UP: 0x0026,     /* Up arrow key.     */
+    RIGHT: 0x0027,  /* Right arrow key.     */
+    DOWN: 0x0028,   /* Down arrow key.     */
+    ENTER: 0x000D,  /* Enter key.     */
+    BACK: 0x01CD,   /* Backspace key.     */
+    EXIT: 0x03E9,   /* Exit key.     */
+    RED: 0x0193,    /* Red color key.     */
+    GREEN: 0x0194,  /* Green color key.     */
+    YELLOW: 0x0195, /* Yellow color key.     */
+    BLUE: 0x0196,   /* Blue color key.     */
+    STOP: 0x019D,   /* Stop key.     */
+    PLAY: 0x019F,   /* Play key.     */
+    PAUSE: 0x0013,  /* Pause key.     */
+    REWIND: 0x019C, /* Rewind key.     */
+    FAST_FORWARD: 0x01A1,   /* Fast forward key.     */
+    PORTAL: 0x025A, /* Portal key.     */
+    POWER: 0x0199,  /* Power key.     */
+    VOL_UP: 0x01BF, /* Volume up key.     */
+    VOL_DOWN: 0x01C0,   /* Volume down key.     */
+    MUTE: 0x01C1,       /* Mute key.     */
+    FORWARD: 0x00A7,    /* Forward key.     */
+    ZOOM: 0x00FB,       /* Zoom key.     */
+    SETTINGS: 0x0263,   /* Settings key.     */
+    MENU: 0x0012,   /* Menu key or home key.     */
+    T_OPT: 0x03EC,      /* Text option key.     */
+    TEXT: 0x01CB,       /* Teletext key.     */
+    TV: 0x02DA,         /* TV key.     */
+    SMART_HOME: 0x02DE, /* Smart Home key.     */
+};
+
+document.addEventListener("keydown",
+    function (e) {
+
+        log("log: key_code = " + e.keyCode);
+        switch (e.keyCode) {
+            case idcap.key.Code.NUM_1:// Remote controller 1
+                select(1);
+                break;
+            case idcap.key.Code.NUM_2:// Remote controller 2
+                select(2);
+            break;
+            case idcap.key.Code.NUM_3:// Remote controller 3
+                select(3);
+            break;
+            case idcap.key.Code.NUM_4:// Remote controller 4
+                select(4);
+                break;
+            case idcap.key.Code.NUM_5:// Remote controller 5
+                select(5);
+                break;
+            case idcap.key.Code.STOP:// Remote controller Stop
+                stopMedia();
+                break;
+            case idcap.key.Code.GREEN:// Remote controller green
+                document.location.reload(true);
+                break;
+            case idcap.key.Code.RED:// Remote controller Red
+                reboot();
+                break;
+            case idcap.key.Code.PORTAL:// Remote controller PORTAL
+                document.location.reload(true);
+                break; 
+            case idcap.key.Code.EXIT:  // Remote controller EXIT
+            location.href = '../../index.html';
+                break;
+        }
+
+    },
+false);
+
+//1.stop , 2.destroy , 3.shutDown
+function shutDown() {
+    idcap.request( "idcap://tv/media/control" , {
+        "parameters": {
+            "command":"stop",
+        },
+        "onSuccess" : function(s) {
+            console.log("onSuccess");
+            idcap.request( "idcap://tv/media/destroy" , {
+                "onSuccess" : function(s) {
+                    console.log("onSuccess");
+                    idcap.request( "idcap://tv/media/shutdown" , {
+                        "onSuccess" : function(s) {
+                            log("shutDown onSuccess");
+                            _media_status = 0; //stop
+                        }, 
+                        "onFailure" : function(f) {
+                            console.log("onFailure : errorMessage = " + f.errorMessage);
+                        }
+                    });
+                }, 
+                "onFailure" : function(f) {
+                    console.log("onFailure : errorMessage = " + f.errorMessage);
+                }
+            });  
+        },
+        "onFailure" : function(f) {
+            console.log("onFailure : errorMessage = " + f.errorMessage);
+        }
+});	
+}
+
+//1.stop , 2.destroy
+function stopMedia() {
+    idcap.request( "idcap://tv/media/control" , {
+        "parameters": {
+            "command":"stop",
+        },
+        "onSuccess" : function(s) {
+            console.log("onSuccess");
+            idcap.request( "idcap://tv/media/destroy" , {
+                "onSuccess" : function(s) {
+                    console.log("onSuccess");
+                }, 
+                "onFailure" : function(f) {
+                    console.log("onFailure : errorMessage = " + f.errorMessage);
+                }
+            });  
+        },
+        "onFailure" : function(f) {
+            console.log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+//1._media.stop , 2._media.destroy , 3.hcap.Media.createMedia, 4._media.play
+function playMedia(srcVideo, mimeType) {
+    if(!mimeType) mimeType = "video/mp4";
+    idcap.request( "idcap://tv/media/control" , {
+        "parameters": {
+            "command":"stop",
+        },
+                "onSuccess" : function() {
+                    console.log("onSuccess");
+                    idcap.request( "idcap://tv/media/destroy" , {
+                        "onSuccess" : function() {
+                            console.log("onSuccess");
+                            idcap.request( "idcap://tv/media/create" , {
+                                "parameters": {
+                                    "url" : srcVideo,
+                                    "mimeType" : mimeType
+                                },
+                                onSuccess: function (s) {
+                                    log("[2] Create Media success");
+                                    hideShow("createMediaSuccess", "inline");
+                                    log(src);
+                                },
+                                onFailure: function (f) {
+                                    log("Error : " + f.errorMessage);
+                                    hideShow("createMediaFail", "inline");
+                                },
+                            });
+
+                            idcap.request( "idcap://tv/media/control" , {
+                                "parameters": {
+                                    "command":"play",
+                                    "repeatCount" : 0,
+                                },
+                                "onSuccess": function () {
+                                    log("onSuccess : playVOD -> " + srcVideo);
+                                    _media_status = 1; //play
+                                    
+                                },
+                                "onFailure": function (f) {
+                                    log("onFailure : errorMessage = " + f.errorMessage);
+                                }
+                            });
+                        }, 
+                        "onFailure" : function(f) {
+                            console.log("onFailure : errorMessage = " + f.errorMessage);
+                        }
+                    });  
+                },
+                "onFailure" : function(f) {
+                    console.log("onFailure : errorMessage = " + f.errorMessage);
+                }
+        });
+
+    
+}
+
+function stopChannel() {
+    idcap.request( "idcap://tv/channel/stop" , {
+        "onSuccess" : function(s) {
+            log("onSuccess : stopCurrentChannel");
+        },
+        "onFailure" : function(f) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+//1.hcap.Media.startUp , 2.hcap.Media.createMedia , 3._media.play
+function playVOD(srcVideo, mimeType) {
+    if(!mimeType) mimeType = "video/mp4";
+    idcap.request( "idcap://tv/media/startup" , {
+        "parameters": {
+        },
+        "onSuccess": function () {
+            log("onSuccess : startUp");
+            idcap.request( "idcap://tv/media/create" , {
+                "parameters": {
+                    "url" : srcVideo,
+                    "mimeType" : mimeType
+                },
+                onSuccess: function (s) {
+                    log("[2] Create Media success");
+                    log(src);
+                },
+                onFailure: function (f) {
+                    log("Error : " + f.errorMessage);
+                },
+            });
+
+            idcap.request( "idcap://tv/media/control" , {
+                "parameters": {
+                    "command":"play",
+                    "repeatCount" : 0,
+                },
+                "onSuccess": function () {
+                    log("onSuccess : playVOD -> " + srcVideo);
+                    _media_status = 1; //play
+                    
+                },
+                "onFailure": function (f) {
+                    log("onFailure : errorMessage = " + f.errorMessage);
+                }
+            });
+        },
+        "onFailure": function (f) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+function playIPChannel(ip, port) {
+    idcap.request( "idcap://tv/channel/change/request" , {
+        "parameters": {
+            "channelType" : "ip",
+            "ip" : ip,
+            "port" : parseInt(port),
+            "ipBroadcastType" : "udp"
+        },
+        "onSuccess": function () {
+            console.log("onSuccess");
+        },
+        "onFailure": function (err) {
+            console.log("onFailure : errorMessage = " + err.errorMessage);
+        }
+    });
+}
+
+function playDvbtChannel(frequency, programNumber) {
+    idcap.request( "idcap://tv/channel/change/request" , {
+        "parameters": {
+            "channelType" : "rf",
+            "frequency" : parseInt(frequency),
+            "programNumber" : programNumber,
+            "rfBroadcastType" : "terrestrial"
+        },
+        "onSuccess": function () {
+            log("onSuccess : requestChangeCurrentChannel");
+        },
+        "onFailure": function (err) {
+            log("onFailure : errorMessage = " + err.errorMessage);
+        }
+    });
+}
+
+idcap.request( "idcap://configuration/property/set" , {
+        "parameters": {
+            "key" : "browser_debug_mode",
+            "value" : "1"
+        },
+        "onSuccess": function () {
+            log("#Success to set browser debug mode");
+        },
+        "onFailure": function (f) {
+            log("#Fail to set browser debug mode(errorMessage = " + f.errorMessage + ")");
+        }
+});
+
+//Set Streaming video size
+function setVideoSize(x, y, w, h) {
+    idcap.request("idcap://video/size/set" , {
+        "parameters": {
+            "x" : x,
+            "y" : y,
+            "width" : w,
+            "height" : h,
+        },
+        "onSuccess": function () {
+            log("onSuccess : setVideoSize - (" + x + "," + y + ") (" + w + "/" + h + ")");
+        },
+        "onFailure": function (err) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+document.addEventListener(
+    "idcap::channel_changed",
+    function (param) {
+        if(param.result == true)
+        {
+            setVideoSize(850, 160, 379, 218);//set video size for the div 'videoChannelLG' 
+
+        }
+        else
+        {
+            log("channel_changed:[" + param.result + "] Error = " + param.errorMessage);
+        }		
+    },
+    false
+);
+
+document.addEventListener(
+    "idcap::media_event_received",
+    function (param) {
+        console.log("event type = " + param.eventType);
+        if(param.eventType == "play_start")
+        {
+            setVideoSize(850, 160, 379, 218);//set video size and location on 'videoChannelLG' 
+        }
+        else
+        {
+            log("media_event_received param.eventType = " + param.eventType);
+        }	
+    },
+    false
+);
+
+function reload(){
+        document.location.reload(true);
+      }
+
+//Pause-Resume of Media played
+var pr = 1;
+function pause_resume(){
+    if(pr){
+        pr = 0;
+        idcap.request( "idcap://tv/media/control" , {
+            "parameters": {
+                "command":"pause",
+            },
+            "onSuccess" : function() {
+                console.log("onSuccess");
+            },
+            "onFailure" : function(f) {
+                console.log("onFailure : errorMessage = " + f.errorMessage);
+            }
+        });
+    }
+    else
+    {
+        pr = 1;
+        idcap.request( "idcap://tv/media/control" , {
+            "parameters": {
+                "command":"resume",
+            },
+            "onSuccess" : function() {
+                console.log("onSuccess");
+            },
+            "onFailure" : function(f) {
+                console.log("onFailure : errorMessage = " + f.errorMessage);
+            }
+        });
+    }
+   
+}
+
+//Rewind of Media played
+function Rewind(){
+    idcap.request( "idcap://tv/media/playposition/get" , {
+        "parameters": {},
+        "onSuccess" : function(s) {
+            log("onSuccess position : " + s.positionInMs);
+            var current = s.positionInMs;
+            idcap.request( "idcap://tv/media/information/get" , {
+                "parameters": {},
+                "onSuccess" : function(s) {
+                    log("onSuccess" +
+                        "\nvideoAvailable = " + s.videoAvailable +
+                        "\ntitle = " + s.title +
+                        "\ncontentLengthInMs = " + s.contentLengthInMs);
+                    idcap.request( "idcap://tv/media/playposition/set" , {
+                        "parameters": {
+                            "positionInMs" : current - (s.contentLengthInMs / 10),
+                        },
+                    "onSuccess" : function() {
+                        log("positionInMs=" + (current - (s.contentLengthInMs / 10)));
+                    },
+                    "onFailure" : function(f) {
+                        log("onFailure : errorMessage = " + f.errorMessage);
+                    }
+                });    
+                },
+                "onFailure" : function(f) {
+                    log("onFailure : errorMessage = " + f.errorMessage);
+                }
+            });
+        },
+        "onFailure" : function(f) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}
+
+//Fast Forward of Media played
+function FF(){
+    idcap.request( "idcap://tv/media/playposition/get" , {
+        "parameters": {},
+        "onSuccess" : function(s) {
+            log("onSuccess position : " + s.positionInMs);
+            var current = s.positionInMs;
+            idcap.request( "idcap://tv/media/information/get" , {
+                "parameters": {
+                },
+                "onSuccess" : function(s) {
+                    log("onSuccess" +
+                        "\nvideoAvailable = " + s.videoAvailable +
+                        "\ntitle = " + s.title +
+                        "\ncontentLengthInMs = " + s.contentLengthInMs);
+                    idcap.request( "idcap://tv/media/playposition/set" , {
+                    "parameters": {
+                        "positionInMs" : current + (s.contentLengthInMs / 10),
+                    },
+                    "onSuccess" : function() {
+                        log("positionInMs=" + (current + (s.contentLengthInMs / 10)));
+                    },
+                    "onFailure" : function(f) {
+                        log("onFailure : errorMessage = " + f.errorMessage);
+                    }
+                });    
+                },
+                "onFailure" : function(f) {
+                    log("onFailure : errorMessage = " + f.errorMessage);
+                }
+            });
+        },
+        "onFailure" : function(f) {
+            log("onFailure : errorMessage = " + f.errorMessage);
+        }
+    });
+}   
+
+function reboot() {
+    idcap.request( "idcap://power/command" , {
+        "parameters": {
+            "powerCommand" : "reboot"
+        },
+        "onSuccess": function () {
+            console.log("Success to reboot");
+        },
+        "onFailure": function (err) {
+            console.log("Fail to reboot : " + err.errorMessage);
+        }
+    });
+}
+
+</script>
+</head>
+
+<body>
+    <span id='title'>Channel and Media Sample application</span>
+    <hr>
+    <p class = "inlineClass logTitle"><b> Press digit button on remote or click a button on screen:</b></p>
+        <button type="button" class="inlineClass reload_btn btn btn-lg" onclick="reload()">Reload</button>
+        <button type="button" class="inlineClass reboot_btn btn btn-lg" onclick="reboot()">Reboot</button>
+        <button type="button" class="inlineClass clear_btn btn btn-lg" onclick="location.href = '../../index.html';">Exit</button>
+       
+        <button type="button" class="inlineClass clear_btn btn btn-lg" onclick="Rewind()">Rewind</button>
+        <button type="button" class="inlineClass clear_btn btn btn-lg" onclick="pause_resume()">pause_play</button>
+        <button type="button" class="inlineClass clear_btn btn btn-lg" onclick="FF()">FF</button>
+
+        <ol>
+        <li>Channel request("239.1.1.1", 8208)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "select(1);">Click</button></li>
+        
+        <li>Channel request("239.1.1.2", 8208)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "select(2);">Click</button></li>
+        
+        <li>Media(VOD example 1)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "select(3);">Click</button></li>
+
+        <li>Media(VOD example 2)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "select(4);">Click</button></li>
+
+        <li>Media(HLS)
+        <button type="button" class="inlineClass clear_btn btn btn-lg" 
+        onClick = "select(5);">Click</button></li>
+    </ol>
+    
+    <div id='logMessage' style='z-index:10000;font-size:10px;background-color:black;text-align:left;color:#fff;line-height:20px;padding-left:40px;padding-top:20px'></div>
+    <div id="videoChannelLG" style="background-image: url(tv:); height: 218px; left: 850px; position: absolute; top: 160px; width: 379px;"></div>
+    
+            
+</body>
+
+</html>

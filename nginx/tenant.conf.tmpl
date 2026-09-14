@@ -1,13 +1,50 @@
-# CoopCentric tenant vhost — rendered by coopcentric-tenant, do not edit by hand.
-# Tenant: {{NAME}}
+# coopcentric-managed vhost — rendered by coopcentric-tenant from nginx/tenant.conf.tmpl.
+# Do not edit by hand: re-rendered on every deploy. Tenant: {{NAME}}
 server {
     listen 80;
     server_name {{HOSTNAME}};
     root /srv/coopcentric/tenants/{{NAME}};
     access_log /var/log/nginx/{{NAME}}.access.log;
 
+    # Static tree the TV reads (xait.xml + app). Served by nginx alone so the TV keeps
+    # booting even if the Node service is down.
     location /procentric/ {
         autoindex off;
         add_header Cache-Control "no-store";
     }
+
+    # Tenant-scoped API — the Node server resolves the tenant from the Host header.
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+    }
+
+    # WebSocket channel to the TVs (step 2).
+    location /ws/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 3600s;
+    }
+
+    # Admin UI (served by the Node process).
+    location /admin {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = / { return 302 /admin; }
 }

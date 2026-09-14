@@ -129,3 +129,29 @@ Decisions already made (do not re-open):
   channel lineups are assigned to groups with per-set override.
 - IP channels now, RF channel types modelled in the schema from day one.
 - Follow the build order in PLATFORM.md; each step must end with something testable on the TV.
+
+### Phase 2 step 1 — server skeleton + renderer v0 (built 2026-09-14, awaiting TV verification)
+
+- `server/` — Node 20 + Express + better-sqlite3. `src/index.js` entry, `src/app.js` builds the
+  app (testable), `src/migrations/*.sql` forward-only migrations (full PLATFORM.md schema in
+  `001_init.sql`), `src/tenants.js` resolves the tenant from the `Host` header (tenants table is
+  mirrored from `/srv/coopcentric/tenants/*/procentric/application/xait.xml` on startup and lazily
+  on an unknown host), `src/routes/tv.js` = `POST /api/tv/register` + `GET /api/tv/poll`,
+  `src/layout.js` = override → group → tenant default → built-in "unassigned" layout.
+  `GET /healthz` is not tenant-scoped. Tests: `cd server && npm test` (node:test, in-memory DB).
+- `systemd/coopcentric.service` runs the server as `www-data` on 127.0.0.1:3000, DB at
+  `/srv/coopcentric/data/coopcentric.db`.
+- `tv-app/` is now source: `src/main.js` → `npm run build` (esbuild, es2015) → `tv-app/dist/`
+  (index.html + app.js + probe.html + lib/ + version.txt). `coopcentric-tenant deploy` rsyncs
+  **dist/**, never the source tree. Renderer v0 draws `text`, `image`, `clock` zones, polls
+  when `ws_url` is null, re-registers on 401. Without LG middleware it only registers when
+  `?serial=…` is in the URL (no phantom sets from laptops).
+- `nginx/tenant.conf.tmpl` now proxies `/api/`, `/ws/`, `/admin` to Node (with
+  `proxy_set_header Host $host` — required for tenant resolution) and redirects `/` to `/admin`.
+  Vhosts rendered by the tool carry a `coopcentric-managed` marker and are re-rendered on every
+  deploy. A hand-made vhost is left alone until `sudo coopcentric-tenant vhost <name> --adopt`
+  (keeps a `.bak-<timestamp>` copy, rolls back if `nginx -t` fails). **hoteldemo's vhost on the
+  VM is hand-made and must be adopted once** before the TV can reach `/api/tv/register`.
+- `install.sh` additionally installs Node from NodeSource (keyring + apt source, no remote
+  script execution), runs `npm ci` in `server/` and `tv-app/`, builds, installs and restarts
+  the service, and checks `/healthz`. `admin/` is built only once it exists (step 2).

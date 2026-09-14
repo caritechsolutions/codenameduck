@@ -4,6 +4,7 @@ import { get, post, del, patch } from '../api.js';
 import { useAsync, Modal, Confirm, Field, Empty, useToast } from '../components/ui.jsx';
 import { fmtDate } from '../util.js';
 import { SessionCtx } from '../App.jsx';
+import LayoutThumb from '../editor/LayoutThumb.jsx';
 
 export default function Layouts() {
   const toast = useToast();
@@ -32,9 +33,10 @@ export default function Layouts() {
       <div className="card" style={{ padding: 0 }}>
         {layouts.data && layouts.data.length === 0 ? <Empty>No layouts yet. Sets without a layout show the built-in "not yet assigned" screen.</Empty> : (
           <table>
-            <thead><tr><th>Name</th><th className="num">Version</th><th>Used by</th><th>Updated</th><th></th></tr></thead>
+            <thead><tr><th></th><th>Name</th><th className="num">Version</th><th>Used by</th><th>Updated</th><th></th></tr></thead>
             <tbody>{(layouts.data || []).map((l) => (
               <tr key={l.id}>
+                <td style={{ width: 130 }}><Link to={`/layouts/${l.id}`}><LayoutThumb doc={l.json} width={120} /></Link></td>
                 <td><Link to={`/layouts/${l.id}`}><b>{l.name}</b></Link>{l.is_default && <span className="pill accent" style={{ marginLeft: 8 }}>tenant default</span>}</td>
                 <td className="num">v{l.version}</td>
                 <td className="muted">{l.group_count} group(s){l.override_count ? `, ${l.override_count} set override(s)` : ''}</td>

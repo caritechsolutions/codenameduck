@@ -180,14 +180,14 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
   });
 
   // ---------------------------------------------------------------- layouts
-  const qLayouts = db.prepare(`SELECT l.id, l.name, l.version, l.updated_at,
+  const qLayouts = db.prepare(`SELECT l.id, l.name, l.version, l.updated_at, l.json,
       (SELECT COUNT(*) FROM layout_assign la WHERE la.layout_id = l.id) AS group_count,
       (SELECT COUNT(*) FROM sets s WHERE s.layout_override_id = l.id) AS override_count,
       (l.id = t.default_layout_id) AS is_default
     FROM layouts l JOIN tenants t ON t.id = l.tenant_id WHERE l.tenant_id = ? ORDER BY l.name`);
   const qLayoutFull = db.prepare('SELECT * FROM layouts WHERE id = ? AND tenant_id = ?');
   const layoutToApi = (l) => ({ id: l.id, name: l.name, version: l.version, updated_at: l.updated_at, json: safe(l.json) });
-  r.get('/layouts', (req, res) => res.json(qLayouts.all(req.tenant.id).map((l) => ({ ...l, is_default: !!l.is_default }))));
+  r.get('/layouts', (req, res) => res.json(qLayouts.all(req.tenant.id).map((l) => ({ ...l, json: safe(l.json), is_default: !!l.is_default }))));
   r.get('/layouts/:id', (req, res) => {
     const l = qLayoutFull.get(Number(req.params.id), req.tenant.id);
     if (!l) return res.status(404).json({ error: 'layout not found' });

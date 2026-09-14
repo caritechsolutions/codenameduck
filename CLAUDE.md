@@ -197,3 +197,12 @@ Decisions already made (do not re-open):
 - Unverified on hardware, flagged in the test plan: IDCAP `toastmsg/create` param name (we send
   both `msg` and `message`), `power/command powerOff`, the screenshot capture URI being
   fetchable via XHR, and HCAP parameter names for volume/toast/launch.
+
+### Phase 2 step 4 — canvas layout editor (built 2026-09-14)
+
+- `admin/src/editor/geometry.js` = pure helpers (snap/clamp/drag/resize, immutable doc edits,
+  zone defaults per type, screens/keys helpers) with unit tests; `CanvasEditor.jsx` = pointer
+  drag/resize with 10 px snapping (Alt free, Shift aspect, video keeps 16:9), arrow nudges;
+  `ZonePanel.jsx` = per-type property panel + canvas/screens/key-map panel; `LayoutThumb.jsx`.
+  `LayoutEdit.jsx` hosts Canvas/JSON tabs over one document, undo, preview-on-set.
+- Layout list API now returns `json` so thumbnails render.

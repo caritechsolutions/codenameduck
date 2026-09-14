@@ -63,3 +63,22 @@ Prerequisite: an IP multicast (or HLS URL) stream reachable from the TV's networ
 7. Edit the lineup (remove the current channel) → TV retunes to the first channel immediately.
 8. HLS URL channel (if defined): switching to it and back to a multicast channel must work
    (media player start/stop is sequenced as in LG's Channel_Media sample).
+
+## Step 4 — canvas layout editor
+
+1. **Layouts** now shows a thumbnail per layout. Open "Standard room": the **Canvas** tab shows
+   the 16:9 canvas with the zones. Click the welcome text zone → the right panel shows its
+   properties. Drag it somewhere else, resize it with a corner handle, change the text.
+   **Save & publish** → the TV redraws with the new position within a second.
+2. Resize the **video** zone by a corner: it keeps 16:9 (hold Alt to break it). Save → live
+   video on the TV moves/resizes to the new rectangle (video/size/set) without retuning.
+3. "Add zone: menu" → a menu appears; edit its items (e.g. "Full screen" = fullscreen_tv, "Info"
+   = show_page → page id `info`); add an `html` zone with id `info` (it is hidden = a page).
+   Save. On the TV: UP/DOWN move the highlight, OK on "Info" opens the page, BACK closes it,
+   PORTAL toggles full-screen video.
+4. Click empty canvas → the panel shows canvas background, screens and remote-key mapping. Map
+   RED → `home`. Save. RED on the remote returns to the home screen.
+5. **Preview on a set** pushes the unsaved canvas to the live TV; Save afterwards makes it
+   permanent, or reload the page to discard (the TV falls back on its next real update).
+6. **JSON** tab shows the same document; a change there is reflected on the canvas and vice
+   versa. Ctrl+Z undoes canvas edits; Delete removes the selected zone.

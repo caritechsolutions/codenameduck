@@ -155,3 +155,28 @@ Decisions already made (do not re-open):
 - `install.sh` additionally installs Node from NodeSource (keyring + apt source, no remote
   script execution), runs `npm ci` in `server/` and `tv-app/`, builds, installs and restarts
   the service, and checks `/healthz`. `admin/` is built only once it exists (step 2).
+
+### Phase 2 step 2 — admin, WebSocket push, heartbeats (built 2026-09-14)
+
+- Auth: `server/src/auth.js` — bcryptjs hashes, opaque session id in HttpOnly cookie `cc_session`,
+  `sessions` table. First boot with no users seeds superadmin `admin` with a random password
+  printed once to the journal. Tenant-admins are confined to their tenant's hostname.
+- Admin API `server/src/routes/admin.js`: login/logout/me, dashboard, sets (patch room/group/
+  override/notes, delete), groups (+ layout assignment), layouts (validate/save/duplicate/delete,
+  saving = publish), preview-on-set, tenant default layout. `server/src/state.js` builds the TV
+  state payload shared by register/poll/WS; `commands.js` queues commands and delivers over WS.
+- WS hub `server/src/ws.js` at `/ws/tv?set_id&token`: hello, layout/lineup/messages/command
+  pushes, `hb` heartbeats (channel/volume/uptime/power_mode/app_version), `ack`. Online = last
+  seen < 3 min. `hub.refresh(tenantId)` recomputes per connected set and pushes only changes.
+- Factory room rule: LG ships `room_number = [TV]<serial>`; `isFactoryRoom()` treats it as
+  unassigned. Admin-assigned room wins and is written back with a `set_property` command.
+- Admin UI `admin/` (Vite + React, base `/admin/`, built to `admin/dist`, served by Node):
+  Login, Dashboard, Sets (drawer with assignment, live status, commands, delete), Groups,
+  Layouts (+ JSON editor with validation, assign to groups, preview on set). Tests: Vitest.
+- Renderer: WebSocket client with reconnect/backoff, 60 s heartbeat, commands `set_property`
+  and `reload_app`, re-registers on 401 or `deleted`. Renderer e2e tests: `cd tv-app && npm run
+  build && npm test` (headless Chromium + `test/fake-idcap.js`; skips if Playwright is missing).
+- **Testing gotcha:** Chromium in the dev container follows the HTTP proxy and DNS, so never
+  point a browser test at a real tenant hostname — it will hit the production VM. Tests use
+  `127.0.0.1` tenants or a `.test` hostname.
+- Per-step TV checklists live in `docs/TV-TEST-PLAN.md`.

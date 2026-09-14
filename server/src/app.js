@@ -1,13 +1,21 @@
 'use strict';
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const express = require('express');
 const { createTenantResolver, syncTenantsFromDisk } = require('./tenants');
 const { createTvRouter } = require('./routes/tv');
+const { createAdminRouter } = require('./routes/admin');
+const { createAuth, seedSuperadmin } = require('./auth');
+const { createStateBuilder } = require('./state');
+const { createHub } = require('./ws');
+const { createCommands } = require('./commands');
 
 function timestamp() { return new Date().toISOString(); }
 
-function createApp({ db, tenantsDir, adminDist, pollIntervalS = 60, log = console.log }) {
+// Builds the Express app + HTTP server + WebSocket hub. Returns { app, server, hub, ... }.
+// Tests call this with an in-memory DB and a temp tenants dir.
+function createServer({ db, tenantsDir, adminDist, pollIntervalS = 60, log = console.log }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -18,46 +26,68 @@ function createApp({ db, tenantsDir, adminDist, pollIntervalS = 60, log = consol
 
   syncTenantsFromDisk(db, tenantsDir, logger);
   const tenants = createTenantResolver(db, tenantsDir, logger);
+  const state = createStateBuilder(db, { pollIntervalS });
+  const auth = createAuth(db);
+  const hub = createHub({ db, tenants, state, log: logger });
+  const commands = createCommands(db, hub, logger);
+  hub.setCommands(commands);
+  app.locals.state = state;
 
-  // Liveness for systemd/curl; not tenant-scoped.
+  const seeded = seedSuperadmin(db);
+  if (seeded) {
+    logger('==========================================================================');
+    logger(`INITIAL SUPERADMIN CREATED  username: ${seeded.username}  password: ${seeded.password}`);
+    logger('Log in at http://<tenant-hostname>/admin and change it under Users. Shown once.');
+    logger('==========================================================================');
+  }
+
   app.get('/healthz', (_req, res) => {
     const n = db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n;
-    res.json({ ok: true, tenants: n, time: timestamp() });
+    res.json({ ok: true, tenants: n, ws: hub.size, time: timestamp() });
   });
 
-  app.use(express.json({ limit: '64kb' }));
+  app.use(express.json({ limit: '1mb' }));
 
   app.use('/api', tenants.middleware);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-  app.use('/api/tv', createTvRouter({ db, pollIntervalS }));
+  app.use('/api/tv', createTvRouter({ db, state, commands, hub, log: logger }));
+  app.use('/api/admin', createAdminRouter({ db, auth, hub, commands, log: logger }));
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
-  // Admin UI: built Vite bundle when present (step 2), placeholder until then.
+  // Admin UI: built Vite bundle when present, placeholder until then.
   app.use('/admin', tenants.middleware);
   if (adminDist && fs.existsSync(path.join(adminDist, 'index.html'))) {
-    app.use('/admin', express.static(adminDist, { index: 'index.html' }));
-    app.get('/admin/*', (_req, res) => res.sendFile(path.join(adminDist, 'index.html')));
+    app.use('/admin', express.static(adminDist, { index: 'index.html', maxAge: '1h', setHeaders(res, p) { if (p.endsWith('index.html')) res.set('Cache-Control', 'no-store'); } }));
+    app.get('/admin/*', (_req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(adminDist, 'index.html')); });
   } else {
     app.get(['/admin', '/admin/*'], (req, res) => {
-      const n = db.prepare('SELECT COUNT(*) AS n FROM sets WHERE tenant_id = ?').get(req.tenant.id).n;
       res.type('html').send(`<!doctype html><meta charset="utf-8"><title>CoopCentric admin</title>
-<body style="font-family:sans-serif;background:#0b1a2a;color:#f2f2f2;padding:40px">
-<h1>CoopCentric admin</h1><p>Tenant <b>${escapeHtml(req.tenant.display_name)}</b> (${escapeHtml(req.tenant.hostname)})</p>
-<p>${n} set(s) registered. The admin UI arrives in Phase 2 step 2.</p></body>`);
+<body style="font-family:sans-serif;background:#0b1a2a;color:#f2f2f2;padding:40px"><h1>CoopCentric admin</h1>
+<p>Tenant <b>${escapeHtml(req.tenant.display_name)}</b> (${escapeHtml(req.tenant.hostname)})</p>
+<p>The admin UI bundle is not built. Run install.sh (it builds admin/).</p></body>`);
     });
   }
 
   app.use((err, req, res, _next) => { // eslint-disable-line no-unused-vars
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'invalid JSON' });
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'payload too large' });
     logger(`ERROR ${req.method} ${req.originalUrl}: ${err.stack || err}`);
     res.status(500).json({ error: 'internal error' });
   });
 
-  return app;
+  const server = http.createServer(app);
+  hub.attach(server);
+  const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
+  expireTimer.unref();
+
+  return { app, server, hub, commands, state, auth, tenants, seeded, log: logger };
 }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-module.exports = { createApp };
+// Back-compat for step-1 tests.
+function createApp(opts) { return createServer(opts).app; }
+
+module.exports = { createServer, createApp };

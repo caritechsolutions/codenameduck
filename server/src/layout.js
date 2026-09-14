@@ -63,4 +63,73 @@ function makeLayoutResolver(db) {
   };
 }
 
-module.exports = { unassignedLayout, makeLayoutResolver };
+
+const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher'];
+
+// Validate + normalise a layout document (schema 1). Returns { doc, errors }.
+function validateLayout(input) {
+  const errors = [];
+  let doc = input;
+  if (typeof doc === 'string') { try { doc = JSON.parse(doc); } catch (e) { return { doc: null, errors: ['invalid JSON: ' + e.message] }; } }
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { doc: null, errors: ['layout must be an object'] };
+  const out = { schema: 1 };
+  if (doc.schema !== undefined && doc.schema !== 1) errors.push('schema must be 1');
+  out.name = typeof doc.name === 'string' && doc.name.trim() ? doc.name.trim().slice(0, 80) : 'Untitled';
+  const c = doc.canvas && typeof doc.canvas === 'object' ? doc.canvas : {};
+  out.canvas = {
+    w: num(c.w, 1920), h: num(c.h, 1080),
+    background: typeof c.background === 'string' ? c.background : '#0b1a2a',
+    backgroundImage: typeof c.backgroundImage === 'string' && c.backgroundImage ? c.backgroundImage : null,
+  };
+  if (!Array.isArray(doc.zones)) { errors.push('zones must be an array'); out.zones = []; }
+  else {
+    const ids = new Set();
+    out.zones = doc.zones.map((z, i) => {
+      if (!z || typeof z !== 'object') { errors.push(`zone ${i} must be an object`); return null; }
+      const id = typeof z.id === 'string' && z.id.trim() ? z.id.trim() : `zone${i + 1}`;
+      if (ids.has(id)) errors.push(`duplicate zone id "${id}"`);
+      ids.add(id);
+      if (!ZONE_TYPES.includes(z.type)) errors.push(`zone "${id}": unknown type "${z.type}"`);
+      for (const k of ['x', 'y', 'w', 'h']) if (z[k] !== undefined && !Number.isFinite(Number(z[k]))) errors.push(`zone "${id}": ${k} must be a number`);
+      return { ...z, id, x: num(z.x, 0), y: num(z.y, 0), w: num(z.w, 200), h: num(z.h, 100) };
+    }).filter(Boolean);
+    if (out.zones.filter((z) => z.type === 'video').length > 1) errors.push('at most one video zone');
+  }
+  out.keys = doc.keys && typeof doc.keys === 'object' ? doc.keys : {};
+  if (doc.screens !== undefined) {
+    if (!Array.isArray(doc.screens)) errors.push('screens must be an array');
+    else {
+      const zoneIds = new Set(out.zones.map((z) => z.id));
+      out.screens = doc.screens.map((s, i) => {
+        const id = s && typeof s.id === 'string' ? s.id : `screen${i + 1}`;
+        const zones = Array.isArray(s && s.zones) ? s.zones.filter((zid) => typeof zid === 'string') : [];
+        for (const zid of zones) if (!zoneIds.has(zid)) errors.push(`screen "${id}" references unknown zone "${zid}"`);
+        return { id, zones };
+      });
+    }
+  } else out.screens = [];
+  return { doc: out, errors };
+}
+
+function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+
+function starterLayout(name = 'New layout') {
+  return {
+    schema: 1, name,
+    canvas: { w: 1920, h: 1080, background: '#0b1a2a', backgroundImage: null },
+    zones: [
+      { id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675, source: 'lineup', startChannel: 'first' },
+      { id: 'welcome', type: 'text', x: 80, y: 60, w: 1400, h: 90, text: 'Welcome to {{hotel}}', style: { fontSize: 56, fontWeight: 'bold', color: '#ffffff' } },
+      { id: 'room', type: 'text', x: 80, y: 150, w: 600, h: 50, text: 'Room {{room}}', style: { fontSize: 30, color: '#8fb3c9' } },
+      { id: 'chlist', type: 'channel_list', x: 80, y: 240, w: 480, h: 560, style: { fontSize: 28, color: '#ffffff', background: 'rgba(0,0,0,0.35)', highlight: '#ffd166' } },
+      { id: 'clock', type: 'clock', x: 1600, y: 980, w: 240, h: 60, format: 'HH:mm', style: { fontSize: 40, color: '#ffffff', align: 'right' } },
+    ],
+    keys: { PORTAL: 'toggle_menu', BACK: 'close_page' },
+    screens: [
+      { id: 'home', zones: ['tv', 'welcome', 'room', 'chlist', 'clock'] },
+      { id: 'fullscreen', zones: ['tv'] },
+    ],
+  };
+}
+
+module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, ZONE_TYPES };

@@ -12,7 +12,8 @@ var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000];
 
 var stage = document.getElementById('stage');
 var statusEl = document.getElementById('status');
-var state = { api: null, props: {}, setId: null, token: null, layoutJson: null, pollInterval: 60, pollTimer: null, clockTimer: null };
+var state = { api: null, props: {}, setId: null, token: null, layoutJson: null, context: {}, pollInterval: 60, pollTimer: null, clockTimer: null,
+  ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null, bootTime: Date.now() };
 
 // ---------------------------------------------------------------- logging
 function log(msg) {
@@ -67,6 +68,21 @@ function getProperty(key) {
           onSuccess: function (s) { done(s && s.value); }, onFailure: function () { done(null); } });
       }
     } catch (e) { done(null); }
+  });
+}
+
+function setProperty(key, value) {
+  return new Promise(function (resolve, reject) {
+    var t = setTimeout(function () { reject(new Error('timeout')); }, PROBE_TIMEOUT_MS);
+    var ok = function () { clearTimeout(t); resolve(true); };
+    var bad = function (e) { clearTimeout(t); reject(new Error((e && e.errorMessage) || 'failed')); };
+    try {
+      if (state.api === 'idcap') {
+        idcap.request('idcap://configuration/property/set', { parameters: { key: key, value: String(value) }, onSuccess: ok, onFailure: bad });
+      } else if (state.api === 'hcap') {
+        hcap.property.setProperty({ key: key, value: String(value), onSuccess: ok, onFailure: bad });
+      } else { clearTimeout(t); reject(new Error('no platform')); }
+    } catch (e) { bad(e); }
   });
 }
 
@@ -217,20 +233,110 @@ function render(layout, ctx) {
   state.clockTimer = setInterval(tickClocks, 1000);
 }
 
-function applyState(data) {
-  var ctx = {
-    hotel: (data.layout && data.layout.hotel) || '',
-    room: data.room_number || state.props.room_number || '',
-    guest: '',
-    serial: state.props.serial_number || ''
-  };
-  var json = JSON.stringify(data.layout);
-  if (json !== state.layoutJson) {
+function applyLayout(layout, ctx, force) {
+  if (ctx) state.context = ctx;
+  var json = JSON.stringify(layout) + JSON.stringify(state.context);
+  if (force || json !== state.layoutJson) {
     state.layoutJson = json;
-    render(data.layout, ctx);
-    log('layout: ' + ((data.layout && data.layout.name) || '?'));
+    render(layout, state.context);
+    log('layout: ' + ((layout && layout.name) || '?') + (layout && layout.version ? ' v' + layout.version : ''));
   }
+}
+
+function applyState(data) {
+  if (data.context) state.context = data.context;
+  else state.context = { hotel: '', room: data.room_number || '', guest: '', serial: state.props.serial_number || '' };
+  applyLayout(data.layout, state.context);
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
+  if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
+  if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
+}
+
+// ---------------------------------------------------------------- commands
+function runCommand(cmd, ack) {
+  var p;
+  try {
+    switch (cmd.type) {
+      case 'set_property':
+        p = setProperty(cmd.payload.key, cmd.payload.value).then(function () {
+          if (cmd.payload.key === 'room_number') state.props.room_number = cmd.payload.value;
+          return { key: cmd.payload.key };
+        });
+        break;
+      case 'reload_app':
+        p = Promise.resolve({ reloading: true });
+        setTimeout(function () { window.location.reload(); }, 500);
+        break;
+      default:
+        p = Promise.reject(new Error('unsupported command ' + cmd.type));
+    }
+  } catch (e) { p = Promise.reject(e); }
+  p.then(function (result) { log('command ' + cmd.type + ' ok'); ack(cmd.id, true, result); },
+         function (err) { log('command ' + cmd.type + ' failed: ' + err.message); ack(cmd.id, false, { error: err.message }); });
+}
+function ackViaHttp(id, ok, result) {
+  request('POST', '/api/tv/ack?set_id=' + encodeURIComponent(state.setId) + '&token=' + encodeURIComponent(state.token), { command_id: id, ok: ok, result: result })
+    .then(null, function () {});
+}
+function ackViaWs(id, ok, result) {
+  if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify({ type: 'ack', command_id: id, ok: ok, result: result }));
+  else ackViaHttp(id, ok, result);
+}
+
+// ---------------------------------------------------------------- websocket
+function heartbeatPayload() {
+  return { type: 'hb', uptime: Math.floor((Date.now() - state.bootTime) / 1000), channel: state.channel || null,
+    volume: null, muted: null, power_mode: state.powerMode || null, app_version: APP_VERSION };
+}
+function connectWs() {
+  if (!state.wsUrl || typeof WebSocket === 'undefined') return;
+  if (state.wsTimer) { clearTimeout(state.wsTimer); state.wsTimer = null; }
+  var proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+  var url = proto + window.location.host + state.wsUrl + '?set_id=' + encodeURIComponent(state.setId) + '&token=' + encodeURIComponent(state.token);
+  var ws;
+  try { ws = new WebSocket(url); } catch (e) { log('ws error: ' + e.message); scheduleWsReconnect(); return; }
+  state.ws = ws;
+  ws.onopen = function () {
+    state.wsBackoff = 0;
+    log('ws connected');
+    ws.send(JSON.stringify(heartbeatPayload()));
+    if (state.hbTimer) clearInterval(state.hbTimer);
+    state.hbTimer = setInterval(function () { if (ws.readyState === 1) ws.send(JSON.stringify(heartbeatPayload())); }, 60000);
+  };
+  ws.onmessage = function (ev) {
+    var msg; try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    onWsMessage(msg);
+  };
+  ws.onclose = function (ev) {
+    if (state.ws === ws) state.ws = null;
+    if (state.hbTimer) { clearInterval(state.hbTimer); state.hbTimer = null; }
+    if (ev && ev.code === 4000) { log('ws replaced by another connection'); return; }
+    log('ws closed' + (ev && ev.code ? ' (' + ev.code + ')' : ''));
+    scheduleWsReconnect();
+  };
+  ws.onerror = function () { /* onclose follows */ };
+}
+function scheduleWsReconnect() {
+  var waits = [3000, 5000, 10000, 20000, 30000, 60000];
+  var wait = waits[Math.min(state.wsBackoff++, waits.length - 1)];
+  if (state.wsTimer) clearTimeout(state.wsTimer);
+  state.wsTimer = setTimeout(connectWs, wait);
+}
+function onWsMessage(msg) {
+  switch (msg.type) {
+    case 'hello': break;
+    case 'layout':
+      if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
+      applyLayout(msg.layout, msg.context || state.context, !!msg.preview);
+      if (msg.preview) log('preview layout from admin');
+      break;
+    case 'lineup': state.lineup = msg.lineup || []; break;
+    case 'messages': state.messages = msg.messages || []; break;
+    case 'command': runCommand(msg.command, ackViaWs); break;
+    case 'deleted': log('this set was deleted in admin; re-registering'); state.setId = null; state.token = null; registerLoop(0); break;
+    case 'pong': break;
+    default: log('ws: unknown message ' + msg.type);
+  }
 }
 
 // ---------------------------------------------------------------- boot loop
@@ -248,6 +354,7 @@ function schedulePoll() {
 function registerLoop(attempt) {
   register().then(function (data) {
     state.setId = data.set_id; state.token = data.token;
+    if (state.ws) { try { state.ws.onclose = null; state.ws.close(); } catch (e) {} state.ws = null; }
     showStatus(false);
     log('registered as set ' + data.set_id + (data.created ? ' (new)' : ''));
     applyState(data);

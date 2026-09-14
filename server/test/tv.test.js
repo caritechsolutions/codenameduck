@@ -56,11 +56,11 @@ async function startServer(tenantsDir) {
 
 test('migrations are idempotent and create the full schema', () => {
   const db = openDb(':memory:');
-  assert.equal(migrate(db), 1);
+  assert.ok(migrate(db) >= 2);
   assert.equal(migrate(db), 0);
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
   for (const t of ['tenants', 'users', 'groups', 'sets', 'layouts', 'layout_assign', 'channels', 'lineups',
-    'lineup_items', 'lineup_assign', 'messages', 'commands', 'events', 'schema_migrations']) {
+    'lineup_items', 'lineup_assign', 'messages', 'commands', 'events', 'schema_migrations', 'sessions']) {
     assert.ok(tables.includes(t), `table ${t} missing`);
   }
 });
@@ -102,7 +102,9 @@ test('register + poll flow', async (t) => {
   assert.ok(reg.json.token.length > 20);
   assert.equal(reg.json.room_number, '204');
   assert.equal(reg.json.group, null);
-  assert.equal(reg.json.ws_url, null);
+  assert.equal(reg.json.ws_url, '/ws/tv');
+  assert.deepEqual(reg.json.commands, []);
+  assert.equal(reg.json.context.hotel, 'hoteldemo');
   assert.equal(reg.json.poll_interval_s, 30);
   assert.equal(reg.json.layout.builtin, 'unassigned');
   const serialZone = reg.json.layout.zones.find((z) => z.id === 'serial');

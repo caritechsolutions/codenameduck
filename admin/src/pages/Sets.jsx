@@ -111,7 +111,7 @@ function SetDrawer({ set, groups, layouts, lineups, onClose, onChanged, onDelete
         <dt>App build</dt><dd className="mono small">{live.app_version || '—'}</dd>
         <dt>IP / MAC</dt><dd className="mono small">{set.ip || '—'}{set.mac ? ` · ${set.mac}` : ''}</dd>
         <dt>Room on TV</dt><dd>{set.reported_room ? <>{set.reported_room}{set.reported_room_is_factory && <span className="pill" style={{ marginLeft: 6 }}>factory default</span>}</> : '—'}</dd>
-        <dt>Power / uptime</dt><dd>{live.power_mode || '—'} · {fmtUptime(live.uptime_s)}</dd>
+        <dt>Power / uptime</dt><dd>{live.power_mode || '—'} · {fmtUptime(live.uptime_s)}{live.instant_power != null && <span className={'pill ' + (live.instant_power ? 'ok' : '')} style={{ marginLeft: 8 }}>Instant On {live.instant_power ? 'on' : 'off'}</span>}</dd>
         <dt>Channel / volume</dt><dd>{live.channel || '—'} · {live.volume == null ? '—' : live.volume}{live.muted ? ' (muted)' : ''}</dd>
         <dt>First seen</dt><dd>{fmtDate(set.first_seen)}</dd>
       </dl>

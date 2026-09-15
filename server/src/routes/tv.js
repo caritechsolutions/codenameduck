@@ -55,6 +55,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
       app_version: str(b.app_version),
       token: crypto.randomBytes(24).toString('base64url'),
     };
+    const instantPower = b.instant_power == null || b.instant_power === '' ? null : (Number(b.instant_power) ? 1 : 0);
 
     const tenant = req.tenant;
     let set = findSet.get(tenant.id, serial);
@@ -64,6 +65,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
       else { const info = insertSet.run({ ...fields, tenant_id: tenant.id }); created = true; set = { id: info.lastInsertRowid }; }
       insertEvent.run(tenant.id, set.id, created ? 'register_new' : 'register',
         JSON.stringify({ api, model: fields.model, firmware: fields.firmware_version, ip: fields.ip, app_version: fields.app_version }));
+      if (instantPower != null) db.prepare('UPDATE sets SET instant_power = ? WHERE id = ?').run(instantPower, set.id);
       set = findSetById.get(set.id, tenant.id);
     })();
 

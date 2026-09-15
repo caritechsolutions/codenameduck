@@ -7,7 +7,7 @@ import * as tv from './platform.js';
 import { KEY, KEY_NAME } from './platform.js';
 
 var APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
-var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number'];
+var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number', 'instant_power'];
 var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000];
 var CLAIMED_KEYS = ['CH_UP', 'CH_DOWN', 'NUM_0', 'NUM_1', 'NUM_2', 'NUM_3', 'NUM_4', 'NUM_5', 'NUM_6', 'NUM_7', 'NUM_8', 'NUM_9', 'PORTAL', 'GUIDE', 'INFO', 'BACK', 'LAST_CH'];
 var BANNER_MS = 3500;
@@ -16,7 +16,8 @@ var DIGIT_TIMEOUT_MS = 2500;
 var stage = document.getElementById('stage');
 var statusEl = document.getElementById('status');
 var overlayEl = document.getElementById('overlay');
-var videoEl = null;            // HTML5 <video> used for URL (HLS/MP4) channels
+var videoEl = null;            // HTML5 <video> used for URL (HLS/MP4) channels — created once, never re-created
+var videoHost = null;          // persistent box: url('TV:') hole for tuner channels, parent of videoEl
 var pendingEvents = [];        // events queued while the WebSocket is down
 var MAX_PENDING_EVENTS = 50;
 var state = {
@@ -126,15 +127,18 @@ var RENDERERS = {
   image: function (e, z, ctx) { var img = document.createElement('img'); img.src = substitute(z.src || '', ctx); img.alt = ''; if (z.fit) img.style.objectFit = z.fit; e.appendChild(img); },
   clock: function (e, z) { e.setAttribute('data-clock', z.format || 'HH:mm'); e.textContent = formatClock(z.format, new Date()); },
   video: function (e, z) {
-    // Tuner channels: the TV video plane shows through this transparent "hole" (LG: url('TV:')).
-    // URL channels: an HTML5 <video> element fills the same box, so resizing the zone moves it.
+    // The zone element is only a placeholder in the stacking order; the actual picture lives in
+    // the persistent #videohost (tuner: transparent url('TV:') hole; URL channels: <video>),
+    // which is repositioned on screen changes and never re-created — re-creating or moving a
+    // playing <video> in the DOM pauses it (that was the black screen on PORTAL).
     var r = effectiveVideoRect(z);
     e.style.left = r.x + 'px'; e.style.top = r.y + 'px'; e.style.width = r.w + 'px'; e.style.height = r.h + 'px';
-    e.style.backgroundImage = "url('TV:')";
-    e.style.background = "url('TV:')";
+    e.style.background = 'transparent';
     e.setAttribute('data-video', '1');
-    if (videoEl) e.appendChild(videoEl);
   },
+  banner: function (e) { e.style.display = 'none'; },   // overlay placement zones draw nothing themselves
+  digits: function (e) { e.style.display = 'none'; },
+  popup: function (e) { e.style.display = 'none'; },
   channel_list: function (e, z) { e.setAttribute('data-chlist', '1'); renderChannelList(e, z); },
   menu: function (e, z) { e.setAttribute('data-menu', '1'); renderMenu(e, z); },
   html: function (e, z) { e.innerHTML = z.html || ''; },
@@ -224,15 +228,20 @@ function render() {
   fitStage(canvas);
   stage.style.background = canvas.background || '#000';
   stage.style.backgroundImage = canvas.backgroundImage ? 'url(' + canvas.backgroundImage + ')' : 'none';
-  while (stage.firstChild) stage.removeChild(stage.firstChild);
+  ensureVideoHost();
+  Array.prototype.slice.call(stage.querySelectorAll('.zone')).forEach(function (n) { stage.removeChild(n); });
+  placeOverlays(layout);
   var visible = visibleZoneIds();
   var skipped = [];
-  var videoZone = null;
+  // The video zone is tracked even when the current screen hides it, so placeVideo() can pause
+  // instead of tearing the channel down.
+  var videoZone = (layout.zones || []).filter(function (z) { return z.type === 'video'; })[0] || null;
   (layout.zones || []).forEach(function (z) {
     if (z.hidden && !(state.openPage === z.id)) return;
     if (visible && !visible[z.id] && state.openPage !== z.id) return;
     var fn = RENDERERS[z.type];
     if (!fn) { skipped.push(z.type); return; }
+    if (z.type === 'banner' || z.type === 'digits' || z.type === 'popup') return;   // placement only
     var e = el('div', 'zone zone-' + z.type);
     e.id = 'zone-' + z.id;
     e.style.left = (z.x || 0) + 'px'; e.style.top = (z.y || 0) + 'px';
@@ -240,7 +249,6 @@ function render() {
     applyStyle(e, z.style);
     fn(e, z, state.context);
     stage.appendChild(e);
-    if (z.type === 'video') videoZone = z;
   });
   if (skipped.length) log('zone types not supported: ' + skipped.join(', '));
   if (state.clockTimer) clearInterval(state.clockTimer);
@@ -248,19 +256,80 @@ function render() {
   placeVideo(videoZone);
 }
 
-// Video: make sure the tuner shows what the layout wants, where it wants it.
+function ensureVideoHost() {
+  if (videoHost) return videoHost;
+  videoHost = el('div', 'videohost');
+  videoHost.id = 'videohost';
+  videoHost.style.backgroundImage = "url('TV:')";
+  videoHost.style.background = "url('TV:')";
+  videoHost.appendChild(ensureVideoEl());
+  stage.insertBefore(videoHost, stage.firstChild);
+  return videoHost;
+}
+function positionVideoHost(r) {
+  ensureVideoHost();
+  videoHost.style.left = r.x + 'px'; videoHost.style.top = r.y + 'px'; videoHost.style.width = r.w + 'px'; videoHost.style.height = r.h + 'px';
+  videoHost.style.display = 'block';
+}
+// Overlay elements (banner, digits, popup) take their geometry from placement zones when present.
+var OVERLAY_DEFAULTS = {
+  banner: { x: 80, y: 880, w: 1200, h: 80 },
+  digits: { x: 1560, y: 60, w: 280, h: 110 },
+  popup: { x: 210, y: 150, w: 1500, h: 200 }
+};
+function placeOverlays(layout) {
+  ['banner', 'digits', 'popup'].forEach(function (type) {
+    var z = (layout.zones || []).filter(function (x) { return x.type === type; })[0];
+    var e = overlayEl.querySelector('.' + type);
+    var r = z || OVERLAY_DEFAULTS[type];
+    e.style.left = r.x + 'px'; e.style.top = r.y + 'px'; e.style.width = r.w + 'px'; e.style.minHeight = r.h + 'px';
+    e.style.right = 'auto'; e.style.bottom = 'auto'; e.style.transform = 'none'; e.style.maxWidth = 'none';
+    e.setAttribute('data-placed', z ? '1' : '0');
+    ['fontSize', 'color', 'background', 'fontWeight', 'align', 'padding', 'borderRadius', 'border', 'opacity'].forEach(function (k) { e.style[k === 'align' ? 'textAlign' : k] = ''; });
+    if (z && z.style) applyStyle(e, z.style);
+  });
+}
+
+// Video: make sure the picture is what the layout wants, where it wants it.
+//  - no video zone in the layout      → stop everything, forget the channel
+//  - video zone not on this screen    → keep the channel, pause to save bandwidth (channel/stop
+//                                       leaves the multicast group; <video> pauses)
+//  - visible, geometry changed        → only move it (video/size/set or CSS), never retune
 function placeVideo(z) {
   if (!z) {
-    if (state.videoRect) { state.videoRect = null; htmlVideoStop(); if (state.api) tv.stopVideo(); state.channel = null; state.mediaMode = null; }
+    if (state.videoRect || state.channel) { state.videoRect = null; htmlVideoStop(); if (state.api) tv.stopVideo(); state.channel = null; state.mediaMode = null; state.videoPaused = false; }
+    if (videoHost) videoHost.style.display = 'none';
     return;
   }
-  var rect = toOsdRect(effectiveVideoRect(z));
+  var vis = visibleZoneIds();
+  var shown = !vis || !!vis[z.id];
+  if (!shown) {
+    if (videoHost) videoHost.style.display = 'none';
+    if (state.channel && !state.videoPaused) {
+      state.videoPaused = true;
+      if (isUrlChannel(state.channel)) { if (state.mediaMode === 'html5' && videoEl) { try { videoEl.pause(); } catch (e) {} } else if (state.api) tv.platformMediaStop().then(null, function () {}); }
+      else if (state.api) tv.channelStop().then(null, function (e) { reportError('channel_stop', e.message); });
+      log('video hidden: paused');
+    }
+    return;
+  }
+  var r = effectiveVideoRect(z);
+  positionVideoHost(r);
+  var rect = toOsdRect(r);
   var key = JSON.stringify(rect);
   var moved = state.videoRect !== key;
   state.videoRect = key;
   if (!state.api) return;
   if (!state.channel) { tuneStart(z); return; }
-  // Only tuner (multicast/RF) video is positioned by the TV; the <video> element follows the zone.
+  if (state.videoPaused) {
+    state.videoPaused = false;
+    if (isUrlChannel(state.channel)) {
+      if (state.mediaMode === 'html5' && videoEl) { var p = videoEl.play(); if (p && p.then) p.then(null, function (e) { reportError('media', 'resume failed: ' + (e && e.message)); }); }
+      else tuneTo(state.channel);      // platform pipeline was torn down; restart it
+    } else tv.channelReplay().then(null, function (e) { reportError('channel_replay', e.message); });
+    log('video shown: resumed');
+  }
+  // Only tuner (multicast/RF) video is positioned by the TV; the <video> element follows the host box.
   if (moved && !isUrlChannel(state.channel)) tv.setVideoSize(rect).then(null, function (e) { reportError('video_size', e.message); });
 }
 function isUrlChannel(ch) { return !!(ch && ch.type === 'ip' && ch.params && ch.params.url); }
@@ -270,6 +339,7 @@ function ensureVideoEl() {
   if (videoEl) return videoEl;
   videoEl = document.createElement('video');
   videoEl.className = 'urlvideo';
+  videoEl.id = 'urlvideo';
   videoEl.autoplay = true; videoEl.muted = false; videoEl.playsInline = true;
   videoEl.setAttribute('preload', 'auto');
   videoEl.addEventListener('error', function () {
@@ -283,8 +353,7 @@ function ensureVideoEl() {
 }
 function htmlVideoPlay(ch) {
   var v = ensureVideoEl();
-  var host = stage.querySelector('[data-video]');
-  if (host && v.parentNode !== host) host.appendChild(v);
+  ensureVideoHost();
   return tv.stopVideo().then(null, function () {}).then(function () {
     return new Promise(function (resolve, reject) {
       var done = false;
@@ -512,6 +581,17 @@ function applyLayout(layout, ctx, force) {
   render();
   log('layout: ' + (state.layout.name || '?') + (state.layout.version ? ' v' + state.layout.version : ''));
 }
+// Program the TV's own start channel (what it shows at power-on before the app is up) with
+// the first tuner channel of the lineup; disable it when the lineup has none.
+function programStartChannel() {
+  if (!state.api) return;
+  var first = state.lineup.filter(function (c) { return !isUrlChannel(c); })[0] || null;
+  var key = first ? JSON.stringify(first.params) + first.type : 'none';
+  if (state.startChannelKey === key) return;
+  state.startChannelKey = key;
+  tv.setStartChannel(first).then(function () { log('start channel: ' + (first ? first.number + ' ' + first.name : 'disabled')); sendEvent('start_channel', { number: first ? first.number : null }); },
+    function (e) { state.startChannelKey = null; reportError('start_channel', e.message); });
+}
 function applyLineup(lineup) {
   var json = JSON.stringify(lineup || []);
   var changed = json !== JSON.stringify(state.lineup);
@@ -519,6 +599,7 @@ function applyLineup(lineup) {
   if (!changed) return;
   log('lineup: ' + state.lineup.length + ' channels');
   refreshChannelList();
+  programStartChannel();
   var hasVideo = !!(state.videoRect);
   if (!hasVideo) return;
   if (!state.channel || !state.lineup.some(function (c) { return c.id === state.channel.id; })) {
@@ -531,17 +612,26 @@ function applyMessages(messages) {
   var m = state.messages[0];
   if (m) showMessage(m.text, 0); else hideMessage();
 }
-function applyPowerMode(mode) {
-  if (!mode || !state.api) return;
-  var want = String(mode).toUpperCase();
-  if (want !== 'WARM' && want !== 'NORMAL') return;
-  if (state.powerMode && String(state.powerMode).toUpperCase() === want) return;
-  tv.setPowerMode(want).then(function () { log('power mode set to ' + want); state.powerMode = want; sendEvent('power_mode', { mode: want }); },
-    function (e) { reportError('power_mode', 'powermode/set ' + want + ': ' + e.message); });
+// Instant On: LG only allows NORMAL↔WARM once the instant_power property is 1, and the TV then
+// handles WARM itself on the remote's power key. So the group setting writes instant_power
+// (1 = WARM group, 0 = NORMAL) and never calls powermode/set.
+function applyInstantPower(want) {
+  if (want == null || !state.api) return;
+  var target = Number(want) ? '1' : '0';
+  var current = state.props.instant_power == null ? null : String(state.props.instant_power);
+  if (current === target || state.instantPowerBusy) return;
+  state.instantPowerBusy = true;
+  tv.setProperty('instant_power', target).then(function () { return tv.getProperty('instant_power'); }).then(function (v) {
+    state.instantPowerBusy = false;
+    state.props.instant_power = v == null ? target : String(v);
+    log('instant_power -> ' + state.props.instant_power);
+    sendEvent('instant_power', { value: state.props.instant_power });
+    if (state.ws && state.ws.readyState === 1) sendHeartbeat(state.ws);
+  }, function (e) { state.instantPowerBusy = false; reportError('instant_power', 'property/set instant_power=' + target + ': ' + e.message); });
 }
 function applyState(data) {
   state.context = data.context || { hotel: '', room: data.room_number || '', guest: '', serial: state.props.serial_number || '' };
-  if (data.power_mode !== undefined) applyPowerMode(data.power_mode);
+  if (data.instant_power !== undefined) applyInstantPower(data.instant_power);
   applyLayout(data.layout, state.context);
   applyLineup(data.lineup);
   if (data.messages) applyMessages(data.messages);
@@ -650,7 +740,8 @@ function reportError(kind, message, extra) {
 // ---------------------------------------------------------------- websocket
 function heartbeatPayload() {
   return { type: 'hb', uptime: Math.floor((Date.now() - state.bootTime) / 1000), channel: state.channel ? state.channel.number : null,
-    volume: state.volume, muted: state.muted, power_mode: state.powerMode, app_version: APP_VERSION };
+    volume: state.volume, muted: state.muted, power_mode: state.powerMode, app_version: APP_VERSION,
+    instant_power: state.props.instant_power == null ? null : Number(state.props.instant_power) };
 }
 function sendHeartbeat(ws) {
   var send = function () { if (ws.readyState === 1) ws.send(JSON.stringify(heartbeatPayload())); };
@@ -697,7 +788,7 @@ function onWsMessage(msg) {
   switch (msg.type) {
     case 'hello': break;
     case 'layout':
-      if (msg.power_mode !== undefined) applyPowerMode(msg.power_mode);
+      if (msg.instant_power !== undefined) applyInstantPower(msg.instant_power);
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview);
       if (msg.preview) log('preview layout from admin');
@@ -786,4 +877,4 @@ function boot() {
 window.addEventListener('resize', function () { if (state.layout) render(); });
 document.addEventListener('DOMContentLoaded', boot);
 // Test hook (read-only view of state).
-window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel };
+window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render };

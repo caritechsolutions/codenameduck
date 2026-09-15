@@ -2,7 +2,8 @@
 export const GRID = 10;
 export const MIN_SIZE = 40;
 export const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-export const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher'];
+export const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher', 'banner', 'digits', 'popup'];
+export const PLACEMENT_TYPES = ['banner', 'digits', 'popup'];   // position/style of the renderer's OSD elements
 export const ACTIONS = ['toggle_menu', 'fullscreen_tv', 'home', 'show_page', 'close_page', 'launch_app', 'tune', 'reload'];
 export const KEY_NAMES = ['PORTAL', 'GUIDE', 'BACK', 'EXIT', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'MENU', 'INFO'];
 
@@ -60,6 +61,9 @@ export function zoneLabel(z) {
     case 'app_launcher': return `apps (${(z.apps || []).length})`;
     case 'weather': return 'weather';
     case 'html': return 'html page';
+    case 'banner': return 'INFO banner position';
+    case 'digits': return 'digit OSD position';
+    case 'popup': return 'message popup position';
     default: return z.type;
   }
 }
@@ -87,6 +91,9 @@ export function newZone(doc, type) {
     case 'html': return { ...base, w: 1200, h: 700, hidden: true, html: '<h1>Hotel information</h1><p>Breakfast 7–10 in the lobby.</p>', style: { fontSize: 32, color: '#ffffff', background: 'rgba(0,0,0,0.85)', padding: 40 } };
     case 'weather': return { ...base, w: 360, h: 120, units: 'metric', style: { fontSize: 36, color: '#ffffff' } };
     case 'app_launcher': return { ...base, w: 600, h: 200, apps: [{ label: 'Netflix', app_id: 'netflix' }, { label: 'YouTube', app_id: 'youtube.leanback.v4' }], style: { fontSize: 32, color: '#ffffff', highlight: '#ffd166' } };
+    case 'banner': return { ...base, x: 80, y: 880, w: 1200, h: 80, style: { fontSize: 48, color: '#ffffff', background: 'rgba(0,0,0,0.65)', borderRadius: 14 } };
+    case 'digits': return { ...base, x: 1560, y: 60, w: 280, h: 110, style: { fontSize: 72, color: '#ffffff', background: 'rgba(0,0,0,0.65)', borderRadius: 14, align: 'right' } };
+    case 'popup': return { ...base, x: 210, y: 150, w: 1500, h: 200, style: { fontSize: 46, color: '#ffffff', background: 'rgba(10,20,40,0.94)', borderRadius: 20, align: 'center' } };
     default: return { ...base, w: 300, h: 200 };
   }
 }
@@ -106,7 +113,8 @@ export function removeZone(doc, id) {
 }
 export function addZone(doc, type, screenId) {
   const z = newZone(doc, type);
-  const screens = (doc.screens || []).map((s) => (s.id === screenId && !z.hidden ? { ...s, zones: [...s.zones, z.id] } : s));
+  const placement = PLACEMENT_TYPES.includes(type);   // overlays are global, not per screen
+  const screens = (doc.screens || []).map((s) => (s.id === screenId && !z.hidden && !placement ? { ...s, zones: [...s.zones, z.id] } : s));
   return { doc: { ...doc, zones: [...doc.zones, z], screens }, zone: z };
 }
 export function duplicateZone(doc, id, screenId) {

@@ -143,3 +143,5 @@ textarea.code { min-height: 380px; font-size: 12px; white-space: pre; tab-size: 
 
 .lasterr { border: 1px solid rgba(255,92,92,.5); background: rgba(255,92,92,.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 13px; }
 .lasterr .mono { margin-top: 4px; word-break: break-all; }
+
+.czone.t-banner, .czone.t-digits, .czone.t-popup { border-style: dashed; border-color: rgba(255,209,102,.7); }

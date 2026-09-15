@@ -4,6 +4,7 @@
 const IP_BROADCAST = ['udp', 'rtp'];
 const RF_BROADCAST = ['terrestrial', 'terrestrial_2', 'cable', 'cable_2', 'satellite', 'satellite_2', 'satellite_cs1', 'satellite_cs2', 'satellite_s3_bs', 'satellite_s3_cs'];
 const POLARIZATION = ['horizontal', 'vertical', 'left', 'right'];
+const VIDEO_STREAM = ['MPEG2', 'H264', 'HEVC'];   // maps to LG VideoStreamType (2, 27, 36)
 const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 function validateChannel(input = {}) {
@@ -32,6 +33,8 @@ function validateChannel(input = {}) {
       if (!IPV4.test(params.ip)) errors.push('ip must be an IPv4 address (e.g. 239.1.1.10)');
       params.port = Number(p.port);
       if (!Number.isInteger(params.port) || params.port < 1 || params.port > 65535) errors.push('port must be 1–65535');
+      if (p.sourceAddress) { params.sourceAddress = String(p.sourceAddress).trim(); if (!IPV4.test(params.sourceAddress)) errors.push('sourceAddress (IGMPv3) must be an IPv4 address'); }
+      if (p.videoStreamType) { if (VIDEO_STREAM.includes(p.videoStreamType)) params.videoStreamType = p.videoStreamType; else errors.push(`videoStreamType must be one of ${VIDEO_STREAM.join(', ')}`); }
     }
   } else if (out.type === 'rf') {
     params.rfBroadcastType = RF_BROADCAST.includes(p.rfBroadcastType) ? p.rfBroadcastType : null;
@@ -40,7 +43,7 @@ function validateChannel(input = {}) {
     if (!Number.isInteger(params.frequency) || params.frequency <= 0) errors.push('frequency must be a positive integer (Hz for terrestrial/cable, kHz for satellite as LG expects)');
     params.programNumber = Number(p.programNumber);
     if (!Number.isInteger(params.programNumber) || params.programNumber < 0) errors.push('programNumber must be a non-negative integer');
-    for (const k of ['majorNumber', 'minorNumber', 'symbolRate', 'satelliteId']) {
+    for (const k of ['majorNumber', 'minorNumber', 'symbolRate', 'satelliteId', 'plpId']) {
       if (p[k] !== undefined && p[k] !== null && p[k] !== '') {
         const n = Number(p[k]);
         if (!Number.isInteger(n) || n < 0) errors.push(`${k} must be a non-negative integer`); else params[k] = n;
@@ -48,6 +51,7 @@ function validateChannel(input = {}) {
     }
     if (p.polarization) { if (POLARIZATION.includes(p.polarization)) params.polarization = p.polarization; else errors.push(`polarization must be one of ${POLARIZATION.join(', ')}`); }
     if (p.modulation) params.modulation = String(p.modulation).slice(0, 32);
+    if (p.videoStreamType) { if (VIDEO_STREAM.includes(p.videoStreamType)) params.videoStreamType = p.videoStreamType; else errors.push(`videoStreamType must be one of ${VIDEO_STREAM.join(', ')}`); }
   }
   out.params = params;
   return { channel: out, errors };
@@ -79,8 +83,8 @@ function parseCsv(text) {
     const cells = splitCsv(lines[i]);
     const rec = {}; header.forEach((h, j) => { rec[h] = (cells[j] || '').trim(); });
     const input = { number: rec.number, name: rec.name, type: (rec.type || (rec.frequency ? 'rf' : 'ip')).toLowerCase(), logo_url: rec.logo_url || null,
-      params: rec.url ? { url: rec.url, mimeType: rec.mimetype } : rec.frequency ? { rfBroadcastType: rec.rfbroadcasttype, frequency: rec.frequency, programNumber: rec.programnumber, majorNumber: rec.majornumber, minorNumber: rec.minornumber, satelliteId: rec.satelliteid, polarization: rec.polarization, symbolRate: rec.symbolrate }
-        : { ip: rec.ip, port: rec.port, ipBroadcastType: rec.ipbroadcasttype || 'udp' } };
+      params: rec.url ? { url: rec.url, mimeType: rec.mimetype } : rec.frequency ? { rfBroadcastType: rec.rfbroadcasttype, frequency: rec.frequency, programNumber: rec.programnumber, majorNumber: rec.majornumber, minorNumber: rec.minornumber, satelliteId: rec.satelliteid, polarization: rec.polarization, symbolRate: rec.symbolrate, plpId: rec.plpid, videoStreamType: rec.videostreamtype || undefined }
+        : { ip: rec.ip, port: rec.port, ipBroadcastType: rec.ipbroadcasttype || 'udp', sourceAddress: rec.sourceaddress || undefined, videoStreamType: rec.videostreamtype || undefined } };
     const { channel, errors: errs } = validateChannel(input);
     if (errs.length) errors.push(`line ${i + 1}: ${errs.join('; ')}`); else rows.push(channel);
   }
@@ -99,9 +103,9 @@ function splitCsv(line) {
   return out;
 }
 function toCsv(channels) {
-  const cols = ['number', 'name', 'type', 'logo_url', 'ip', 'port', 'ipBroadcastType', 'url', 'mimeType', 'rfBroadcastType', 'frequency', 'programNumber', 'majorNumber', 'minorNumber', 'satelliteId', 'polarization', 'symbolRate'];
+  const cols = ['number', 'name', 'type', 'logo_url', 'ip', 'port', 'ipBroadcastType', 'sourceAddress', 'videoStreamType', 'url', 'mimeType', 'rfBroadcastType', 'frequency', 'programNumber', 'majorNumber', 'minorNumber', 'satelliteId', 'polarization', 'symbolRate', 'plpId'];
   const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
   return [cols.join(','), ...channels.map((c) => cols.map((k) => esc(k in c ? c[k] : c.params[k])).join(','))].join('\n') + '\n';
 }
 
-module.exports = { validateChannel, rowToApi, parseCsv, toCsv, IP_BROADCAST, RF_BROADCAST, POLARIZATION };
+module.exports = { validateChannel, rowToApi, parseCsv, toCsv, IP_BROADCAST, RF_BROADCAST, POLARIZATION, VIDEO_STREAM };

@@ -64,7 +64,7 @@ function makeLayoutResolver(db) {
 }
 
 
-const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher'];
+const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher', 'banner', 'digits', 'popup'];
 
 // Validate + normalise a layout document (schema 1). Returns { doc, errors }.
 function validateLayout(input) {
@@ -94,6 +94,7 @@ function validateLayout(input) {
       return { ...z, id, x: num(z.x, 0), y: num(z.y, 0), w: num(z.w, 200), h: num(z.h, 100) };
     }).filter(Boolean);
     if (out.zones.filter((z) => z.type === 'video').length > 1) errors.push('at most one video zone');
+    for (const t of ['banner', 'digits', 'popup']) if (out.zones.filter((z) => z.type === t).length > 1) errors.push(`at most one ${t} zone`);
   }
   out.keys = doc.keys && typeof doc.keys === 'object' ? doc.keys : {};
   if (doc.screens !== undefined) {

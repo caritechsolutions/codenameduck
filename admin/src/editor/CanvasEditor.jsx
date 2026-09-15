@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { HANDLES, dragRect, resizeRect, zoneLabel } from './geometry.js';
+import { HANDLES, PLACEMENT_TYPES, dragRect, resizeRect, zoneLabel } from './geometry.js';
 
 // 16:9 canvas that draws the layout's zones as boxes you can select, drag and resize.
 // Coordinates are converted between screen pixels and canvas pixels via `scale`.
@@ -11,7 +11,7 @@ export default function CanvasEditor({ doc, onChange, selectedId, onSelect, scre
   const [drag, setDrag] = useState(null);       // { id, mode: 'move'|handle, start:{x,y}, rect, shift }
   const [ghost, setGhost] = useState(null);      // live rect during drag
   const screen = (doc.screens || []).find((s) => s.id === screenId);
-  const inScreen = (z) => !screen || screen.zones.includes(z.id);
+  const inScreen = (z) => !screen || PLACEMENT_TYPES.includes(z.type) || screen.zones.includes(z.id);
 
   const onPointerDown = (e, z, mode) => {
     e.preventDefault(); e.stopPropagation();
@@ -84,6 +84,9 @@ export default function CanvasEditor({ doc, onChange, selectedId, onSelect, scre
               {z.type === 'clock' && <div className="ctext">{z.format === 'HH:mm:ss' ? '20:15:30' : z.format && /a/.test(z.format) ? '08:15 PM' : '20:15'}</div>}
               {z.type === 'image' && (z.src ? <img src={z.src} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : null)}
               {z.type === 'weather' && <div className="ctext">☀ 24°</div>}
+              {z.type === 'banner' && <div className="ctext">5  News   20:15</div>}
+              {z.type === 'digits' && <div className="ctext" style={{ textAlign: 'right' }}>12</div>}
+              {z.type === 'popup' && <div className="ctext" style={{ textAlign: 'center' }}>Your taxi is waiting at reception</div>}
               {sel && HANDLES.map((h) => <div key={h} className={`handle h-${h}`} onPointerDown={(e) => onPointerDown(e, z, h)} />)}
             </div>
           );

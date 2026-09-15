@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { get } from '../api.js';
 import { Field } from '../components/ui.jsx';
-import { ZONE_TYPES, ACTIONS, KEY_NAMES, updateZone, renameZone, removeZone, moveZoneOrder, duplicateZone, toggleZoneInScreen, addScreen, removeScreen } from './geometry.js';
+import { ZONE_TYPES, PLACEMENT_TYPES, ACTIONS, KEY_NAMES, updateZone, renameZone, removeZone, moveZoneOrder, duplicateZone, toggleZoneInScreen, addScreen, removeScreen } from './geometry.js';
 
 const num = (v) => (v === '' || v == null ? undefined : Number(v));
 
@@ -104,7 +104,7 @@ export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenI
       <div className="grid4">
         {['x', 'y', 'w', 'h'].map((k) => <Field key={k} label={k.toUpperCase()}><input type="number" value={zone[k]} onChange={(e) => setZ({ [k]: Number(e.target.value) })} aria-label={k.toUpperCase()} /></Field>)}
       </div>
-      {screenId && (doc.screens || []).length > 0 && (
+      {screenId && (doc.screens || []).length > 0 && !PLACEMENT_TYPES.includes(zone.type) && (
         <label className="inline" style={{ color: 'var(--text)', fontSize: 13, marginBottom: 10 }}><input type="checkbox" checked={onThisScreen} onChange={() => onChange(toggleZoneInScreen(doc, screenId, zone.id))} /> visible on screen "{screenId}"</label>)}
       <label className="inline" style={{ color: 'var(--text)', fontSize: 13, marginBottom: 10, marginLeft: 14 }}><input type="checkbox" checked={!!zone.hidden} onChange={(e) => setZ({ hidden: e.target.checked || undefined })} /> hidden page (opened by a menu action)</label>
 
@@ -141,6 +141,10 @@ export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenI
       {zone.type === 'html' && <>
         <Field label="HTML"><textarea className="code" style={{ minHeight: 160 }} value={zone.html || ''} onChange={(e) => setZ({ html: e.target.value })} aria-label="HTML" /></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontSize', 'color', 'background', 'padding', 'borderRadius']} />
+      </>}
+      {PLACEMENT_TYPES.includes(zone.type) && <>
+        <p className="muted small">{zone.type === 'banner' ? 'Where the INFO / channel-change banner appears (number, name, clock).' : zone.type === 'digits' ? 'Where typed channel digits appear.' : 'Where one-off message commands pop up.'} Shown on every screen; delete the zone to use the default position.</p>
+        <StyleFields style={zone.style} onChange={setStyle} fields={['fontSize', 'color', 'background', 'align', 'fontWeight', 'padding', 'borderRadius', 'opacity']} />
       </>}
       {zone.type === 'weather' && <>
         <Field label="Units"><select value={zone.units || 'metric'} onChange={(e) => setZ({ units: e.target.value })}><option value="metric">°C</option><option value="imperial">°F</option></select></Field>

@@ -73,7 +73,7 @@ test('remote keys: CH+/- walk the lineup, digits tune by number, PORTAL toggles 
   assert.equal(f.media.mimeType, 'application/x-mpegURL');
   const uris = f.calls.map((c) => c.uri);
   assert.ok(uris.includes('idcap://tv/media/startup') && uris.includes('idcap://tv/media/create') && uris.includes('idcap://tv/media/control'));
-  assert.ok(await s.page.$('#zone-tv video.urlvideo'), 'video element lives inside the video zone');
+  assert.ok(await s.page.$('#videohost video.urlvideo'), 'the single video element lives in the persistent host');
   assert.ok(s.logs.some((l) => /ERROR media: HTML5 video failed/.test(l)), 'HTML5 failure reported');
   await s.key(0x1AB); // wraps to 5 → media must be torn down before tuning
   await s.page.waitForFunction(() => window.__fake.channel && window.__fake.channel.ip === '239.1.1.5' && window.__fake.media === null, null, { timeout: 5000 });

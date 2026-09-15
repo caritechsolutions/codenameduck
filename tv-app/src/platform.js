@@ -25,6 +25,7 @@ Object.keys(KEY).forEach(function (k) { KEY_NAME[KEY[k]] = k; });
 // HCAP enum mappings for the string values we store in channel params.
 var HCAP_RF = { terrestrial: 16, terrestrial_2: 17, satellite: 32, satellite_2: 33, satellite_cs1: 34, satellite_cs2: 35, satellite_s3_bs: 36, satellite_s3_cs: 37, cable: 48, cable_2: 49 };
 var HCAP_IP = { udp: 16, rtp: 32 };
+var HCAP_VST = { MPEG2: 2, H264: 27, HEVC: 36 };
 
 var api = null;          // 'idcap' | 'hcap' | null
 var listeners = {};
@@ -100,12 +101,14 @@ function channelParams(ch) {
   var p = ch.params || {};
   if (ch.type === 'rf') {
     var rf = { channelType: 'rf', frequency: Number(p.frequency), programNumber: Number(p.programNumber), rfBroadcastType: p.rfBroadcastType };
-    ['majorNumber', 'minorNumber', 'satelliteId', 'polarization', 'symbolRate', 'modulation'].forEach(function (k) { if (p[k] !== undefined && p[k] !== null && p[k] !== '') rf[k] = p[k]; });
-    if (api === 'hcap') { rf.channelType = hcap.channel.ChannelType.RF; rf.rfBroadcastType = HCAP_RF[p.rfBroadcastType] || hcap.channel.RfBroadcastType.TERRESTRIAL; }
+    ['majorNumber', 'minorNumber', 'satelliteId', 'polarization', 'symbolRate', 'modulation', 'plpId', 'videoStreamType'].forEach(function (k) { if (p[k] !== undefined && p[k] !== null && p[k] !== '') rf[k] = p[k]; });
+    if (api === 'hcap') { rf.channelType = hcap.channel.ChannelType.RF; rf.rfBroadcastType = HCAP_RF[p.rfBroadcastType] || hcap.channel.RfBroadcastType.TERRESTRIAL; if (p.videoStreamType) rf.videoStreamType = HCAP_VST[p.videoStreamType] || undefined; }
     return rf;
   }
   var ip = { channelType: 'ip', ip: p.ip, port: Number(p.port), ipBroadcastType: p.ipBroadcastType || 'udp' };
-  if (api === 'hcap') { ip.channelType = hcap.channel.ChannelType.IP; ip.ipBroadcastType = HCAP_IP[p.ipBroadcastType] || hcap.channel.IpBroadcastType.UDP; }
+  if (p.sourceAddress) ip.sourceAddress = p.sourceAddress;          // IGMPv3 source-specific multicast
+  if (p.videoStreamType) ip.videoStreamType = p.videoStreamType;    // e.g. HEVC
+  if (api === 'hcap') { ip.channelType = hcap.channel.ChannelType.IP; ip.ipBroadcastType = HCAP_IP[p.ipBroadcastType] || hcap.channel.IpBroadcastType.UDP; if (p.videoStreamType) ip.videoStreamType = HCAP_VST[p.videoStreamType] || undefined; }
   return ip;
 }
 
@@ -177,6 +180,18 @@ export function stopVideo() {
   return mediaStop().then(function () {
     return api === 'idcap' ? idcapCall('idcap://tv/channel/stop', {}) : hcapCall(hcap.channel.stopCurrentChannel, {});
   }).then(null, function () {});
+}
+// Start channel: what the TV tunes at power-on (before/without the app). null disables it.
+export function setStartChannel(ch) {
+  var params = ch ? channelParams(ch) : (api === 'hcap' ? { channelType: hcap.channel.ChannelType.UNKNOWN } : { channelType: 'unknown' });
+  return api === 'idcap' ? idcapCall('idcap://tv/channel/startchannel/set', params) : hcapCall(hcap.channel.setStartChannel, params);
+}
+// Pause/resume the tuner without changing channel (channel/stop leaves the multicast group).
+export function channelStop() {
+  return api === 'idcap' ? idcapCall('idcap://tv/channel/stop', {}) : hcapCall(hcap.channel.stopCurrentChannel, {});
+}
+export function channelReplay() {
+  return api === 'idcap' ? idcapCall('idcap://tv/channel/replay', {}) : hcapCall(hcap.channel.replayCurrentChannel, {});
 }
 export function currentChannel() {
   return api === 'idcap' ? idcapCall('idcap://tv/channel/get', {}) : hcapCall(hcap.channel.getCurrentChannel, {});

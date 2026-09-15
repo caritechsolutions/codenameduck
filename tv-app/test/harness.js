@@ -25,6 +25,7 @@ async function startStack(opts = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-e2e-data-'));
   const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir, pollIntervalS: 15, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand });
   srv.app.use('/procentric/application', express.static(DIST, { etag: false, cacheControl: false }));
+  srv.app.use('/fixtures', express.static(path.join(__dirname, 'fixtures'), { etag: false, cacheControl: false }));
   await new Promise((r) => srv.server.listen(0, '127.0.0.1', r));
   const port = srv.server.address().port;
   const base = `http://127.0.0.1:${port}`;
@@ -47,7 +48,7 @@ async function launchChromium() {
   catch { try { pw = require('/opt/node22/lib/node_modules/playwright'); } catch { return null; } }
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/proxy/i.test(k)));
   try {
-    return await pw.chromium.launch({ env, args: ['--no-proxy-server'] });
+    return await pw.chromium.launch({ env, args: ['--no-proxy-server', '--autoplay-policy=no-user-gesture-required'] });
   } catch (e) { console.log('# chromium unavailable: ' + e.message.split('\n')[0]); return null; }
 }
 

@@ -21,6 +21,11 @@ describe('channel form logic', () => {
     const rf = toPayload({ number: '3', name: 'RF', type: 'rf', enabled: true, params: { rfBroadcastType: 'satellite_2', frequency: '11000', programNumber: '4', majorNumber: '', satelliteId: '1', polarization: 'vertical' } });
     expect(rf.params).toEqual({ rfBroadcastType: 'satellite_2', frequency: 11000, programNumber: 4, satelliteId: 1, polarization: 'vertical' });
     expect(describeParams({ type: 'ip', params: { ip: '239.1.1.2', port: 5000 } })).toBe('udp://239.1.1.2:5000');
+    const ssm = toPayload({ number: '4', name: 'SSM', type: 'ip', enabled: true, ipMode: 'multicast', params: { ip: '239.1.1.4', port: '5000', ipBroadcastType: 'rtp', sourceAddress: '10.0.0.9', videoStreamType: 'HEVC' } });
+    expect(ssm.params).toEqual({ ipBroadcastType: 'rtp', ip: '239.1.1.4', port: 5000, sourceAddress: '10.0.0.9', videoStreamType: 'HEVC' });
+    const t2 = toPayload({ number: '5', name: 'T2', type: 'rf', enabled: true, params: { rfBroadcastType: 'terrestrial_2', frequency: '490000000', programNumber: '4', plpId: '1', videoStreamType: 'HEVC' } });
+    expect(t2.params).toEqual({ rfBroadcastType: 'terrestrial_2', frequency: 490000000, programNumber: 4, plpId: 1, videoStreamType: 'HEVC' });
+    expect(validate({ number: '4', name: 'x', type: 'ip', ipMode: 'multicast', params: { ip: '239.1.1.4', port: '5000', sourceAddress: 'bad' } })).toMatchObject({ sourceAddress: expect.any(String) });
     expect(describeParams({ type: 'rf', params: { rfBroadcastType: 'cable', frequency: 57000000, programNumber: 3 } })).toContain('57.000 MHz');
   });
   it('moveItem reorders immutably', () => {

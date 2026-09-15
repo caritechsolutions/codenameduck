@@ -17,7 +17,8 @@ function createHub({ db, tenants, state, log = () => {} }) {
   const heartbeat = db.prepare(`UPDATE sets SET last_seen = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
     last_hb = strftime('%Y-%m-%dT%H:%M:%fZ','now'), channel = COALESCE(@channel, channel),
     volume = COALESCE(@volume, volume), muted = COALESCE(@muted, muted), uptime_s = COALESCE(@uptime, uptime_s),
-    power_mode = COALESCE(@power_mode, power_mode), app_version = COALESCE(@app_version, app_version) WHERE id = @id`);
+    power_mode = COALESCE(@power_mode, power_mode), app_version = COALESCE(@app_version, app_version),
+    instant_power = COALESCE(@instant_power, instant_power) WHERE id = @id`);
   const insertEvent = db.prepare('INSERT INTO events (tenant_id, set_id, type, payload_json) VALUES (?, ?, ?, ?)');
   let commands = null;   // set later (circular)
 
@@ -96,6 +97,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
         uptime: Number.isFinite(Number(msg.uptime)) && msg.uptime !== null ? Math.floor(Number(msg.uptime)) : null,
         power_mode: msg.power_mode ? String(msg.power_mode).slice(0, 16) : null,
         app_version: msg.app_version ? String(msg.app_version).slice(0, 64) : null,
+        instant_power: msg.instant_power == null ? null : (Number(msg.instant_power) ? 1 : 0),
       });
       conn.alive = true;
     } else if (msg.type === 'ack') {
@@ -138,7 +140,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
       const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.power_mode || '');
       if (force || c.sent.layout !== layoutKey) {
         c.sent.layout = layoutKey;
-        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, power_mode: st.power_mode });
+        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, power_mode: st.power_mode, instant_power: st.instant_power });
         touched = true;
       }
       const lineupKey = JSON.stringify(st.lineup);

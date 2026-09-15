@@ -17,7 +17,7 @@ export default function Groups() {
     } catch (e) { toast(e.message, 'bad'); }
   }
   async function powerMode(g, mode) {
-    try { await patch(`/groups/${g.id}`, { power_mode: mode || null }); toast(mode ? `Power mode ${mode} pushed to online sets in ${g.name}` : 'Power mode left to the sets'); groups.reload(); }
+    try { await patch(`/groups/${g.id}`, { power_mode: mode || null }); toast(mode ? `instant_power=${mode === 'WARM' ? 1 : 0} pushed to online sets in ${g.name}` : 'Power mode left to the sets'); groups.reload(); }
     catch (e) { toast(e.message, 'bad'); }
   }
   async function save(form) {
@@ -44,8 +44,8 @@ export default function Groups() {
                 <td className="num">{g.set_count}</td>
                 <td><select value={g.layout_id || ''} onChange={(e) => assign(g, e.target.value)} style={{ maxWidth: 260 }}>
                   <option value="">— tenant default —</option>{(layouts.data || []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></td>
-                <td><select value={g.power_mode || ''} onChange={(e) => powerMode(g, e.target.value)} aria-label={`power mode ${g.name}`} title="WARM = LG Instant On: the app stays loaded while the screen is off, so the TV comes back instantly">
-                  <option value="">— leave as is —</option><option value="WARM">WARM (Instant On)</option><option value="NORMAL">NORMAL</option></select></td>
+                <td><select value={g.power_mode || ''} onChange={(e) => powerMode(g, e.target.value)} aria-label={`power mode ${g.name}`} title="Writes the TV property instant_power: WARM = 1 (Instant On, the set keeps the app resident and handles WARM itself on the power key), NORMAL = 0">
+                  <option value="">— leave as is —</option><option value="WARM">Instant On (instant_power=1)</option><option value="NORMAL">Normal (instant_power=0)</option></select></td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><button className="sm" onClick={() => setEditing(g)}>Edit</button> <button className="sm danger" onClick={() => setRemoving(g)}>Delete</button></td>
               </tr>))}</tbody>
           </table>)}

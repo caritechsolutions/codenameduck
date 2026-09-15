@@ -44,5 +44,8 @@ describe('geometry', () => {
     expect(doc.screens[0].zones).not.toContain('welcome');
     expect(nextZoneId({ zones: [{ id: 'chlist' }] }, 'channel_list')).toBe('chlist2');
     expect(newZone(doc, 'video')).toMatchObject({ type: 'video', w: 1200, h: 675 });
+    const withBanner = addZone(doc, 'banner', 'home');
+    expect(withBanner.zone).toMatchObject({ type: 'banner', x: 80, y: 880 });
+    expect(withBanner.doc.screens[0].zones).not.toContain('banner'); // placement zones are global
   });
 });

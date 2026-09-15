@@ -72,11 +72,12 @@ test('1280x720 set: video coords scale to display_resolution; banner, digits and
   await s.page.close();
 });
 
-test('errors and ws lifecycle reach the server log; WARM power mode applied from the group', async (t) => {
+test('errors and ws lifecycle reach the server log; WARM group writes instant_power, never powermode/set', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
   const s = await setup(t, { viewport: { width: 1920, height: 1080 }, osd: '1920x1080', powerMode: 'WARM' });
-  await s.page.waitForFunction(() => window.__fake.powerMode === 'WARM', null, { timeout: 5000 });
-  assert.equal((await s.fake()).powerMode, 'WARM');
+  await s.page.waitForFunction(() => window.__fake.props.instant_power === '1', null, { timeout: 5000 });
+  assert.equal((await s.fake()).powerMode, 'NORMAL', 'powermode/set is never called by the renderer');
+  assert.equal((await s.fake()).calls.filter((c) => c.uri === 'idcap://power/powermode/set').length, 0);
   // a failing channel change is reported with kind tune
   await s.page.evaluate(() => { const orig = window.idcap.request; window.__fake.failNext = true; window.idcap.request = function (uri, o) {
     if (uri === 'idcap://tv/channel/change/request' && window.__fake.failNext) { window.__fake.failNext = false; setTimeout(function () { o.onSuccess({}); window.__fakeEvent('idcap::channel_changed', { result: false, errorMessage: 'no signal on 239.1.1.7' }); }, 10); return; }

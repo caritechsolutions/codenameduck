@@ -239,3 +239,23 @@ Decisions already made (do not re-open):
 - Groups have `power_mode` (WARM = Instant On) applied by the renderer via `power/powermode/set`.
 - Vhost: `xait.xml`/`index.html` no-store, `lib/` and the content-hashed `app.<hash>.js`
   immutable; `tv-app/build.mjs` hashes the bundle and rewrites index.html.
+
+### Phase 2 step 3c — persistent video, OSD placement zones, start channel, instant_power (2026-09-15)
+
+- Renderer keeps one `#videohost` (tuner hole + the single `<video>` element) for the life of
+  the app; `render()` only recreates `.zone` elements and repositions the host. Moving a playing
+  `<video>` in the DOM pauses it — that was the black screen on PORTAL. Hidden video zone →
+  `channel/stop` / `video.pause()`, shown again → `channel/replay` / `play()`; never a re-tune.
+- Layout zone types `banner`, `digits`, `popup` only place/style the renderer's OSD elements
+  (global, not per screen; defaults when absent). Canvas editor and server validation know them.
+- Start channel: `tv/channel/startchannel/set` with the first tuner channel of the lineup,
+  `channelType unknown` (HCAP `UNKNOWN`) when there is none.
+- Instant On: LG blocks NORMAL↔WARM until property `instant_power` is 1, and the TV handles WARM
+  itself afterwards. The group power mode therefore writes `instant_power` (1/0) via
+  `configuration/property/set`; the renderer never calls `powermode/set`. `sets.instant_power`
+  is what the set reports (register + heartbeat), shown in the drawer.
+- Channel model: `sourceAddress` (IGMPv3) and `videoStreamType` (MPEG2/H264/HEVC → LG enum
+  2/27/36) on IP multicast, `plpId` (DVB-T2) and `videoStreamType` on RF; CSV columns added.
+- `tv-app/test/fixtures/tiny.webm` is a VP8 clip generated with Chromium's MediaRecorder; the
+  step 3c test plays it through the real `<video>` path and asserts the same element instance is
+  still playing after PORTAL.

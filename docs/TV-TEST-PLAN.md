@@ -134,3 +134,30 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
    revert; "— leave as is —" stops the server from touching it.
 6. **Toast** still works (parameter is now `msg` only, text cut at 162 bytes).
 7. Screenshot remains "capture uri not readable" — parked until LG's file-path doc is in the repo.
+
+## Step 3c — persistent video, OSD placement, start channel, Instant On via instant_power
+
+1. **PORTAL on HLS.** Tune the H.265 HLS channel, press PORTAL: the picture fills the screen
+   with audio and keeps playing; PORTAL again: back to the rectangle, still playing, no zap
+   needed. The `<video>` element is now created once and only repositioned. Same on multicast
+   (only `video/size/set` is called; the set's events show no `tv_channel` during the switch).
+2. **Hidden video.** Make a screen without the video zone (e.g. an "info" screen reached from a
+   menu item `show_page`, or a second screen mapped to a key). Opening it must stop audio/video
+   (tuner: `channel/stop`, so the set leaves the multicast group; HLS: `<video>` pauses); leaving
+   it resumes (`channel/replay` / play) without a re-tune. Check with `journalctl`/drawer events:
+   no `tv_channel` event for the round trip.
+3. **Start channel.** After the lineup loads the set's own start channel is programmed with the
+   first multicast/RF channel (`tv/channel/startchannel/set`; events show `tv_start_channel`).
+   Power the set off and on: it should come up on that channel instead of raster/no-signal before
+   the app draws. If the lineup has URL channels only, the start channel is disabled.
+4. **OSD placement.** Layouts → add zone "banner", drag it (e.g. top centre), Save. INFO shows the
+   banner there. Same for "digits" (typed channel numbers) and "popup" (message command). Delete
+   the zone → default positions (bottom-left, top-right, upper centre).
+5. **Instant On.** Groups → "Instant On (instant_power=1)". The drawer's Power line shows
+   "Instant On on" after the next heartbeat (the set reports the property back). Power off/on with
+   the remote: the TV handles WARM itself; the app must be back instantly. The renderer no longer
+   calls `powermode/set` at all; the admin "Power off" still uses `power/command powerOff`. Set
+   "Normal (instant_power=0)" and confirm it reverts.
+6. **Channel forms.** New fields: IP multicast has Source address (IGMPv3) and Video codec
+   (MPEG2/H264/HEVC); RF has Video codec and, for terrestrial_2 (DVB-T2), PLP ID. Try HEVC on a
+   multicast channel if you have one; CSV export/import carries the new columns.

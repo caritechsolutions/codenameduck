@@ -51,6 +51,7 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
       room_number: set.room_number,
       group: group ? { id: group.id, name: group.name } : null,
       power_mode: (group && group.power_mode) || null,
+      instant_power: group && group.power_mode ? (group.power_mode === 'WARM' ? 1 : 0) : null,
       context: context(tenant, set),
       layout: resolveLayout(tenant, set),
       lineup: lineup.channels,

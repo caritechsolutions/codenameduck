@@ -3,14 +3,15 @@ import { Field } from './ui.jsx';
 
 export const RF_TYPES = ['terrestrial', 'terrestrial_2', 'cable', 'cable_2', 'satellite', 'satellite_2', 'satellite_cs1', 'satellite_cs2', 'satellite_s3_bs', 'satellite_s3_cs'];
 export const POLARIZATIONS = ['', 'horizontal', 'vertical', 'left', 'right'];
+export const VIDEO_STREAM_TYPES = ['', 'MPEG2', 'H264', 'HEVC'];
 
 export function emptyChannel() { return { number: '', name: '', logo_url: '', type: 'ip', enabled: true, params: { ipBroadcastType: 'udp', ip: '', port: '' } }; }
 
 export function describeParams(c) {
   const p = c.params || {};
-  if (c.type === 'rf') return `${p.rfBroadcastType || '?'} ${p.frequency ? (p.frequency / 1e6).toFixed(3) + ' MHz' : ''} prog ${p.programNumber ?? '?'}${p.majorNumber != null ? ` · ${p.majorNumber}${p.minorNumber != null ? '-' + p.minorNumber : ''}` : ''}`;
+  if (c.type === 'rf') return `${p.rfBroadcastType || '?'} ${p.frequency ? (p.frequency / 1e6).toFixed(3) + ' MHz' : ''} prog ${p.programNumber ?? '?'}${p.plpId != null ? ` plp ${p.plpId}` : ''}${p.majorNumber != null ? ` · ${p.majorNumber}${p.minorNumber != null ? '-' + p.minorNumber : ''}` : ''}${p.videoStreamType ? ` · ${p.videoStreamType}` : ''}`;
   if (p.url) return `${p.url}${p.mimeType ? ` (${p.mimeType})` : ''}`;
-  return `${p.ipBroadcastType || 'udp'}://${p.ip || '?'}:${p.port || '?'}`;
+  return `${p.ipBroadcastType || 'udp'}://${p.ip || '?'}:${p.port || '?'}${p.sourceAddress ? ` from ${p.sourceAddress}` : ''}${p.videoStreamType ? ` · ${p.videoStreamType}` : ''}`;
 }
 
 // Client-side validation mirrors server/src/channels.js so mistakes show before saving.
@@ -27,6 +28,7 @@ export function validate(ch) {
       if (!/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(p.ip || '')) errors.ip = 'IPv4 address, e.g. 239.1.1.10';
       const port = Number(p.port);
       if (!Number.isInteger(port) || port < 1 || port > 65535) errors.port = '1–65535';
+      if (p.sourceAddress && !/^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(p.sourceAddress)) errors.sourceAddress = 'IPv4 address';
     }
   } else {
     if (!RF_TYPES.includes(p.rfBroadcastType)) errors.rfBroadcastType = 'Choose a broadcast type';
@@ -40,11 +42,18 @@ export function validate(ch) {
 export function toPayload(ch) {
   const p = { ...ch.params };
   let params;
-  if (ch.type === 'ip') params = (ch.ipMode === 'url' || (p.url && ch.ipMode !== 'multicast')) ? { url: p.url, mimeType: p.mimeType || undefined } : { ipBroadcastType: p.ipBroadcastType || 'udp', ip: p.ip, port: Number(p.port) };
-  else {
+  if (ch.type === 'ip') {
+    if (ch.ipMode === 'url' || (p.url && ch.ipMode !== 'multicast')) params = { url: p.url, mimeType: p.mimeType || undefined };
+    else {
+      params = { ipBroadcastType: p.ipBroadcastType || 'udp', ip: p.ip, port: Number(p.port) };
+      if (p.sourceAddress) params.sourceAddress = p.sourceAddress;
+      if (p.videoStreamType) params.videoStreamType = p.videoStreamType;
+    }
+  } else {
     params = { rfBroadcastType: p.rfBroadcastType, frequency: Number(p.frequency), programNumber: Number(p.programNumber) };
-    for (const k of ['majorNumber', 'minorNumber', 'satelliteId', 'symbolRate']) if (p[k] !== '' && p[k] != null) params[k] = Number(p[k]);
+    for (const k of ['majorNumber', 'minorNumber', 'satelliteId', 'symbolRate', 'plpId']) if (p[k] !== '' && p[k] != null) params[k] = Number(p[k]);
     if (p.polarization) params.polarization = p.polarization;
+    if (p.videoStreamType) params.videoStreamType = p.videoStreamType;
   }
   return { id: ch.id, number: Number(ch.number), name: ch.name.trim(), logo_url: ch.logo_url || null, type: ch.type, enabled: !!ch.enabled, params };
 }
@@ -82,13 +91,17 @@ export default function ChannelForm({ channel, onSave, onCancel }) {
               <label className="inline"><input type="radio" name="ipMode" checked={ch.ipMode === 'url'} onChange={() => set('ipMode', 'url')} /> Stream URL (media player)</label>
             </div>
           </Field>
-          {ch.ipMode === 'multicast' ? (
+          {ch.ipMode === 'multicast' ? (<>
             <div className="row">
               <Field label="Broadcast"><select value={ch.params.ipBroadcastType || 'udp'} onChange={(e) => setP('ipBroadcastType', e.target.value)} aria-label="ipBroadcastType"><option value="udp">udp</option><option value="rtp">rtp</option></select></Field>
               <Field label="Multicast IP"><input value={ch.params.ip || ''} onChange={(e) => setP('ip', e.target.value)} placeholder="239.1.1.10" aria-label="Multicast IP" />{err('ip')}</Field>
               <Field label="Port"><input value={ch.params.port || ''} onChange={(e) => setP('port', e.target.value)} placeholder="5000" inputMode="numeric" aria-label="Port" />{err('port')}</Field>
             </div>
-          ) : (
+            <div className="row">
+              <Field label="Source address (IGMPv3, optional)"><input value={ch.params.sourceAddress || ''} onChange={(e) => setP('sourceAddress', e.target.value)} placeholder="10.0.0.9" aria-label="Source address" />{err('sourceAddress')}</Field>
+              <Field label="Video codec"><select value={ch.params.videoStreamType || ''} onChange={(e) => setP('videoStreamType', e.target.value)} aria-label="Video stream type">{VIDEO_STREAM_TYPES.map((v) => <option key={v} value={v}>{v || 'auto'}</option>)}</select></Field>
+            </div>
+          </>) : (
             <div className="row">
               <Field label="URL"><input value={ch.params.url || ''} onChange={(e) => setP('url', e.target.value)} placeholder="http://host/stream.m3u8" aria-label="URL" style={{ minWidth: 260 }} />{err('url')}</Field>
               <Field label="MIME type"><input value={ch.params.mimeType || ''} onChange={(e) => setP('mimeType', e.target.value)} placeholder="application/x-mpegURL (auto)" /></Field>
@@ -106,7 +119,11 @@ export default function ChannelForm({ channel, onSave, onCancel }) {
             <Field label="Major"><input value={ch.params.majorNumber ?? ''} onChange={(e) => setP('majorNumber', e.target.value)} inputMode="numeric" /></Field>
             <Field label="Minor"><input value={ch.params.minorNumber ?? ''} onChange={(e) => setP('minorNumber', e.target.value)} inputMode="numeric" /></Field>
             <Field label="Symbol rate"><input value={ch.params.symbolRate ?? ''} onChange={(e) => setP('symbolRate', e.target.value)} inputMode="numeric" /></Field>
+            <Field label="Video codec"><select value={ch.params.videoStreamType || ''} onChange={(e) => setP('videoStreamType', e.target.value)} aria-label="Video stream type">{VIDEO_STREAM_TYPES.map((v) => <option key={v} value={v}>{v || 'auto'}</option>)}</select></Field>
           </div>
+          {ch.params.rfBroadcastType === 'terrestrial_2' && <div className="row">
+            <Field label="PLP ID (DVB-T2)"><input value={ch.params.plpId ?? ''} onChange={(e) => setP('plpId', e.target.value)} inputMode="numeric" aria-label="PLP ID" /></Field>
+          </div>}
           {/^satellite/.test(ch.params.rfBroadcastType || '') && (
             <div className="row">
               <Field label="Satellite ID"><input value={ch.params.satelliteId ?? ''} onChange={(e) => setP('satelliteId', e.target.value)} inputMode="numeric" /></Field>

@@ -14,7 +14,7 @@ const { createServer } = require(path.join(serverRoot, 'src/app'));
 const DIST = path.resolve(__dirname, '..', 'dist');
 
 async function startStack(opts = {}) {
-  if (!fs.existsSync(path.join(DIST, 'app.js'))) throw new Error('tv-app/dist missing — run npm run build first');
+  if (!fs.existsSync(DIST) || !fs.readdirSync(DIST).some((f) => /^app\.[0-9a-f]+\.js$/.test(f))) throw new Error('tv-app/dist missing — run npm run build first');
   const tenantsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-e2e-'));
   const appDir = path.join(tenantsDir, 'e2e', 'procentric', 'application');
   fs.mkdirSync(appDir, { recursive: true });

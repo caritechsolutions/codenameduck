@@ -26,6 +26,9 @@ Working name of the server: **coopcentric**.
 - Verified: plain HTTP on port 80 through Nginx Proxy Manager returns 200 with the Host header
   intact. HTTPS support and redirect-following by the TV are NOT yet verified — do not force SSL
   or add http→https redirects on tenant hostnames.
+- **Every NPM proxy host for a tenant needs "Websockets Support" switched on** — otherwise the
+  TV's `/ws/tv` upgrade fails silently and sets fall back to 60 s polling (verified 2026-09-15:
+  it was off for hoteldemo and the WebSocket never connected).
 - There is **no PMS API on the TV**. Check-in/out logic lives on our server; the TV only has a
   `checkout` call that wipes guest data.
 
@@ -221,3 +224,18 @@ Decisions already made (do not re-open):
   clears local state and shows the configured message.
 - Admin pages: Messages, Users (+ change my password), Settings (hotel, defaults, weather,
   logo, assets), Tenants (superadmin). Image zone panel has an asset picker.
+
+### Phase 2 step 3b — fixes after the first step 3 TV session (2026-09-15)
+
+- Renderer: the overlay layer (banner, digits, popup, message bar) is scaled with the stage, so
+  OSD elements exist on 720p sets (they were drawn off-screen before). Video coordinates scale
+  straight from the layout canvas to `display_resolution`. The `fullscreen` screen expands the
+  video zone to the whole canvas. URL channels play in an HTML5 `<video>` inside the zone (so
+  resizing the zone moves them); on element error the renderer falls back to LG's media
+  pipeline. One-off `message` commands use a popup, persistent messages the bottom bar.
+- TV events (`error`, `ws`, `media`, `channel`, `platform`) go to the events table via WS or
+  `POST /api/tv/events` while offline; `tv_error` also hits the journal; the newest one is
+  `last_error` on the set (admin drawer). Toast sends `{msg}` only (162-byte cap).
+- Groups have `power_mode` (WARM = Instant On) applied by the renderer via `power/powermode/set`.
+- Vhost: `xait.xml`/`index.html` no-store, `lib/` and the content-hashed `app.<hash>.js`
+  immutable; `tv-app/build.mjs` hashes the bundle and rewrites index.html.

@@ -83,7 +83,7 @@ test('browser mode: no middleware → local hint; ?serial= registers', async (t)
   if (!browser) { t.skip('chromium unavailable'); return; }
   const stack = await startStack(); t.after(stack.close);
   const r = await openRenderer(stack, { fake: false, query: '?serial=BROWSER1' });
-  await r.page.waitForFunction(() => /BROWSER1/.test(document.body.textContent), null, { timeout: 15000 });
+  await r.page.waitForFunction(() => { const z = document.querySelector('#zone-serial'); return z && /BROWSER1/.test(z.textContent); }, null, { timeout: 20000 });
   assert.ok(r.logs.some((l) => /browser mode/.test(l)));
   assert.equal(stack.db.prepare('SELECT COUNT(*) n FROM sets').get().n, 1);
   await r.page.close();

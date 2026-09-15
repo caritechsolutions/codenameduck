@@ -106,3 +106,31 @@ Prerequisite: an IP multicast (or HLS URL) stream reachable from the TV's networ
 7. **Channels → Import CSV**: Export first, edit, import — existing numbers update, new ones
    are created, bad lines are reported.
 8. Re-run `install.sh`: uploaded logo/assets must survive (deploy excludes `assets/`).
+
+## Step 3b — fixes from the first step 3 TV session
+
+Deploy, then `sudo coopcentric-tenant deploy` re-renders the managed vhost with the new cache
+rules; check `curl -sI http://hoteldemo.caritech.net/procentric/application/index.html | grep -i cache`
+says `no-store` and `.../lib/idcap.js` says `immutable`.
+
+1. **Full screen with HLS.** Tune to the HLS channel, press PORTAL: the picture must fill the
+   whole screen; PORTAL again returns it to the video rectangle. Then the same on a multicast
+   channel (that path uses `video/size/set`). URL channels now play in an HTML5 `<video>`
+   element inside the video zone; if the element cannot play a stream the renderer falls back to
+   LG's media pipeline and logs the reason. Tell me which path the set reports: the set drawer's
+   events show `tv_channel` with `mode: html5` or `mode: platform`.
+2. **On-screen message.** Drawer → Message "Your taxi is here", 30 s → a boxed popup near the
+   top of the screen; Messages page → a bar at the bottom. Both at once must be visible. Root
+   cause was the OSD layer not being scaled to the TV's resolution, so it was drawn off screen.
+3. **Digits and INFO.** Type 7: the digit shows top-right, tunes after 2.5 s (or OK). INFO shows
+   "5  News  20:15" for ~3.5 s bottom-left.
+4. **Errors.** Tune to the H.265 HLS channel: the drawer now shows a red "Last TV error" box
+   (kind `media`, the HTML5 error, then the platform fallback error if that also fails) and
+   `journalctl -u coopcentric` shows `TV ERROR set N: [media] …`. Pull the TV's network cable for
+   a minute and plug it back in: events `tv_ws close` / `tv_ws open (reconnect)` appear.
+5. **Instant On.** Groups → power mode WARM for "Standard rooms". The TV's drawer shows
+   `Power / uptime: WARM …` on the next heartbeat. Power the set off and on with the remote: the
+   app should be back immediately without a reload (WARM keeps it resident). Set NORMAL to
+   revert; "— leave as is —" stops the server from touching it.
+6. **Toast** still works (parameter is now `msg` only, text cut at 162 bytes).
+7. Screenshot remains "capture uri not readable" — parked until LG's file-path doc is in the repo.

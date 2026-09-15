@@ -140,3 +140,6 @@ textarea.code { min-height: 380px; font-size: 12px; white-space: pre; tab-size: 
 .thumb { width: 160px; aspect-ratio: 16/9; position: relative; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; background: #0b1a2a; }
 .thumb div { position: absolute; border: 1px solid rgba(255,255,255,.45); }
 .thumb .t-video { background: repeating-linear-gradient(45deg, #182a3a 0 4px, #12202d 4px 8px); }
+
+.lasterr { border: 1px solid rgba(255,92,92,.5); background: rgba(255,92,92,.08); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 13px; }
+.lasterr .mono { margin-top: 4px; word-break: break-all; }

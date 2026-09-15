@@ -16,6 +16,9 @@ var DIGIT_TIMEOUT_MS = 2500;
 var stage = document.getElementById('stage');
 var statusEl = document.getElementById('status');
 var overlayEl = document.getElementById('overlay');
+var videoEl = null;            // HTML5 <video> used for URL (HLS/MP4) channels
+var pendingEvents = [];        // events queued while the WebSocket is down
+var MAX_PENDING_EVENTS = 50;
 var state = {
   api: null, props: {}, setId: null, token: null, context: {}, layout: null, layoutJson: null,
   screen: null, screenStack: [], lineup: [], channel: null, lastChannel: null, tuning: null, videoRect: null,
@@ -60,21 +63,33 @@ function register() {
 function poll() { return request('GET', '/api/tv/poll' + authQs()); }
 
 // ---------------------------------------------------------------- stage geometry
+// The stage AND the overlay (banner, digits, messages) are laid out in canvas pixels and
+// scaled to the viewport together, so OSD elements land on screen at any TV resolution.
 function fitStage(canvas) {
   var w = (canvas && canvas.w) || 1920, h = (canvas && canvas.h) || 1080;
-  stage.style.width = w + 'px'; stage.style.height = h + 'px';
   var s = Math.min(window.innerWidth / w, window.innerHeight / h) || 1;
+  state.canvasSize = { w: w, h: h };
   state.scale = s;
   state.offset = { x: Math.floor((window.innerWidth - w * s) / 2), y: Math.floor((window.innerHeight - h * s) / 2) };
-  stage.style.transform = 'scale(' + s + ')';
-  stage.style.left = state.offset.x + 'px';
-  stage.style.top = state.offset.y + 'px';
+  [stage, overlayEl].forEach(function (e) {
+    e.style.width = w + 'px'; e.style.height = h + 'px';
+    e.style.transform = 'scale(' + s + ')';
+    e.style.left = state.offset.x + 'px';
+    e.style.top = state.offset.y + 'px';
+  });
 }
-// Canvas rect → OSD pixels (display_resolution), which is what video/size/set wants.
+// Canvas rect → OSD pixels. LG positions the tuner video in display_resolution coordinates
+// (1280x720 / 1920x1080 / 3840x2160), so scale straight from the layout canvas to that.
 function toOsdRect(z) {
+  var c = state.canvasSize || { w: 1920, h: 1080 };
   var osdW = (state.osd && state.osd.w) || window.innerWidth, osdH = (state.osd && state.osd.h) || window.innerHeight;
-  var kx = osdW / window.innerWidth, ky = osdH / window.innerHeight;
-  return { x: (state.offset.x + z.x * state.scale) * kx, y: (state.offset.y + z.y * state.scale) * ky, width: z.w * state.scale * kx, height: z.h * state.scale * ky };
+  var kx = osdW / c.w, ky = osdH / c.h;
+  return { x: z.x * kx, y: z.y * ky, width: z.w * kx, height: z.h * ky };
+}
+// The "fullscreen" screen shows the video zone over the whole canvas.
+function effectiveVideoRect(z) {
+  if (state.screen === 'fullscreen') { var c = state.canvasSize || { w: 1920, h: 1080 }; return { x: 0, y: 0, w: c.w, h: c.h }; }
+  return { x: z.x, y: z.y, w: z.w, h: z.h };
 }
 
 // ---------------------------------------------------------------- rendering helpers
@@ -111,10 +126,14 @@ var RENDERERS = {
   image: function (e, z, ctx) { var img = document.createElement('img'); img.src = substitute(z.src || '', ctx); img.alt = ''; if (z.fit) img.style.objectFit = z.fit; e.appendChild(img); },
   clock: function (e, z) { e.setAttribute('data-clock', z.format || 'HH:mm'); e.textContent = formatClock(z.format, new Date()); },
   video: function (e, z) {
-    // The TV video plane shows through this transparent "hole" (LG: background-image url('TV:')).
+    // Tuner channels: the TV video plane shows through this transparent "hole" (LG: url('TV:')).
+    // URL channels: an HTML5 <video> element fills the same box, so resizing the zone moves it.
+    var r = effectiveVideoRect(z);
+    e.style.left = r.x + 'px'; e.style.top = r.y + 'px'; e.style.width = r.w + 'px'; e.style.height = r.h + 'px';
     e.style.backgroundImage = "url('TV:')";
     e.style.background = "url('TV:')";
     e.setAttribute('data-video', '1');
+    if (videoEl) e.appendChild(videoEl);
   },
   channel_list: function (e, z) { e.setAttribute('data-chlist', '1'); renderChannelList(e, z); },
   menu: function (e, z) { e.setAttribute('data-menu', '1'); renderMenu(e, z); },
@@ -232,16 +251,65 @@ function render() {
 // Video: make sure the tuner shows what the layout wants, where it wants it.
 function placeVideo(z) {
   if (!z) {
-    if (state.videoRect) { state.videoRect = null; if (state.api) tv.stopVideo(); state.channel = null; }
+    if (state.videoRect) { state.videoRect = null; htmlVideoStop(); if (state.api) tv.stopVideo(); state.channel = null; state.mediaMode = null; }
     return;
   }
-  var rect = toOsdRect(z);
+  var rect = toOsdRect(effectiveVideoRect(z));
   var key = JSON.stringify(rect);
   var moved = state.videoRect !== key;
   state.videoRect = key;
   if (!state.api) return;
   if (!state.channel) { tuneStart(z); return; }
-  if (moved) tv.setVideoSize(rect).then(null, function (e) { log('video/size/set failed: ' + e.message); });
+  // Only tuner (multicast/RF) video is positioned by the TV; the <video> element follows the zone.
+  if (moved && !isUrlChannel(state.channel)) tv.setVideoSize(rect).then(null, function (e) { reportError('video_size', e.message); });
+}
+function isUrlChannel(ch) { return !!(ch && ch.type === 'ip' && ch.params && ch.params.url); }
+
+// ---------------------------------------------------------------- URL channels (HTML5 video)
+function ensureVideoEl() {
+  if (videoEl) return videoEl;
+  videoEl = document.createElement('video');
+  videoEl.className = 'urlvideo';
+  videoEl.autoplay = true; videoEl.muted = false; videoEl.playsInline = true;
+  videoEl.setAttribute('preload', 'auto');
+  videoEl.addEventListener('error', function () {
+    var err = videoEl.error;
+    var msg = 'video element error ' + (err ? err.code : '?') + (err && err.message ? ' ' + err.message : '');
+    if (videoEl.__reject) videoEl.__reject(new Error(msg));
+  });
+  videoEl.addEventListener('playing', function () { if (videoEl.__resolve) videoEl.__resolve(true); });
+  videoEl.addEventListener('stalled', function () { sendEvent('media', { kind: 'stalled', src: videoEl.currentSrc }); });
+  return videoEl;
+}
+function htmlVideoPlay(ch) {
+  var v = ensureVideoEl();
+  var host = stage.querySelector('[data-video]');
+  if (host && v.parentNode !== host) host.appendChild(v);
+  return tv.stopVideo().then(null, function () {}).then(function () {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; reject(new Error('video element timeout')); } }, 15000);
+      v.__resolve = function () { if (!done) { done = true; clearTimeout(t); resolve(true); } };
+      v.__reject = function (e) { if (!done) { done = true; clearTimeout(t); reject(e); } };
+      v.src = ch.params.url;
+      var p = v.play();
+      if (p && p.then) p.then(null, function (e) { v.__reject(new Error('play() rejected: ' + (e && e.message))); });
+    });
+  });
+}
+function htmlVideoStop() {
+  if (!videoEl) return;
+  try { videoEl.__resolve = null; videoEl.__reject = null; videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); } catch (e) {}
+}
+// URL channel: HTML5 <video> first; if the element cannot play it, fall back to LG's media
+// pipeline (tv/media/*), and report whatever fails.
+function playUrlChannel(ch) {
+  return htmlVideoPlay(ch).then(function () { state.mediaMode = 'html5'; return true; }, function (e) {
+    reportError('media', 'HTML5 video failed for ' + ch.params.url + ': ' + e.message + ' — trying platform media player');
+    htmlVideoStop();
+    if (!state.api) throw e;
+    return tv.platformMediaPlay(ch.params.url, ch.params.mimeType).then(function () { state.mediaMode = 'platform'; return true; });
+  });
 }
 function tuneStart(z) {
   if (!state.lineup.length) { log('video zone but lineup is empty'); return; }
@@ -270,18 +338,21 @@ function tuneTo(ch) {
   banner(ch.number + '  ' + ch.name);
   if (!state.api) return Promise.resolve(true);
   var token = state.tuning = {};
-  return tv.tune(ch).then(function () {
+  var run;
+  if (isUrlChannel(ch)) run = playUrlChannel(ch);
+  else { htmlVideoStop(); run = (state.mediaMode === 'platform' ? tv.platformMediaStop() : Promise.resolve()).then(function () { state.mediaMode = null; return tv.tune(ch); }); }
+  return run.then(function () {
     if (state.tuning !== token) return false;
-    log('tuned ' + ch.number + ' ' + ch.name);
+    log('tuned ' + ch.number + ' ' + ch.name + (state.mediaMode ? ' (' + state.mediaMode + ')' : ''));
     var rect = state.videoRect ? JSON.parse(state.videoRect) : null;
-    if (rect) tv.setVideoSize(rect).then(null, function (e) { log('video/size/set failed: ' + e.message); });
-    sendEvent('channel', { number: ch.number, id: ch.id });
+    if (rect && !isUrlChannel(ch)) tv.setVideoSize(rect).then(null, function (e) { reportError('video_size', e.message); });
+    sendEvent('channel', { number: ch.number, id: ch.id, mode: state.mediaMode || 'tuner' });
     if (state.ws && state.ws.readyState === 1) sendHeartbeat(state.ws);   // admin sees the new channel at once
     return true;
   }, function (e) {
-    log('tune ' + ch.number + ' failed: ' + e.message);
+    if (state.tuning !== token) return false;
     banner(ch.number + '  ' + ch.name + ' — no signal');
-    sendEvent('tune_error', { number: ch.number, error: e.message });
+    reportError('tune', 'channel ' + ch.number + ' ' + ch.name + ': ' + e.message, { number: ch.number });
     return false;
   });
 }
@@ -308,6 +379,8 @@ function banner(text, ms) {
   if (state.bannerTimer) clearTimeout(state.bannerTimer);
   state.bannerTimer = setTimeout(function () { b.className = 'banner'; }, ms || BANNER_MS);
 }
+// Persistent messages (admin Messages page) use the bottom bar; one-off "message" commands
+// use the popup so they never fight with the bar.
 function showMessage(text, ttlS) {
   var m = overlayEl.querySelector('.message');
   m.textContent = text; m.className = 'message show';
@@ -315,6 +388,16 @@ function showMessage(text, ttlS) {
   if (ttlS !== 0) state.messageTimer = setTimeout(function () { m.className = 'message'; }, (ttlS || 20) * 1000);
 }
 function hideMessage() { overlayEl.querySelector('.message').className = 'message'; }
+function showPopup(text, ttlS) {
+  var m = overlayEl.querySelector('.popup');
+  m.textContent = text; m.className = 'popup show';
+  if (state.popupTimer) clearTimeout(state.popupTimer);
+  if (ttlS !== 0) state.popupTimer = setTimeout(function () { m.className = 'popup'; }, (ttlS || 30) * 1000);
+}
+function channelBanner() {
+  if (!state.channel) return;
+  banner(state.channel.number + '  ' + state.channel.name + '   ' + formatClock('HH:mm', new Date()));
+}
 function digitsDisplay() {
   var d = overlayEl.querySelector('.digits');
   d.textContent = state.digits; d.className = 'digits' + (state.digits ? ' show' : '');
@@ -405,7 +488,7 @@ function onKeyDown(ev) {
   else if (name === 'CH_DOWN') step(-1);
   else if (name === 'ENTER' && state.digits) commitDigits();
   else if (name === 'LAST_CH') { var prev = findChannel(state.prevChannel); if (prev) tuneTo(prev); }
-  else if (name === 'INFO') { if (state.channel) banner(state.channel.number + '  ' + state.channel.name + '   ' + formatClock('HH:mm', new Date())); else handled = false; }
+  else if (name === 'INFO') { if (state.channel) channelBanner(); else handled = false; }
   else if (keys[name]) doAction(keys[name]);
   else if (name === 'PORTAL' || name === 'GUIDE') doAction('toggle_menu');
   else if (name === 'BACK' || name === 'EXIT') doAction('close_page');
@@ -448,8 +531,17 @@ function applyMessages(messages) {
   var m = state.messages[0];
   if (m) showMessage(m.text, 0); else hideMessage();
 }
+function applyPowerMode(mode) {
+  if (!mode || !state.api) return;
+  var want = String(mode).toUpperCase();
+  if (want !== 'WARM' && want !== 'NORMAL') return;
+  if (state.powerMode && String(state.powerMode).toUpperCase() === want) return;
+  tv.setPowerMode(want).then(function () { log('power mode set to ' + want); state.powerMode = want; sendEvent('power_mode', { mode: want }); },
+    function (e) { reportError('power_mode', 'powermode/set ' + want + ': ' + e.message); });
+}
 function applyState(data) {
   state.context = data.context || { hotel: '', room: data.room_number || '', guest: '', serial: state.props.serial_number || '' };
+  if (data.power_mode !== undefined) applyPowerMode(data.power_mode);
   applyLayout(data.layout, state.context);
   applyLineup(data.lineup);
   if (data.messages) applyMessages(data.messages);
@@ -504,14 +596,14 @@ function runCommand(cmd, ack) {
       }
       case 'volume': r = tv.setVolume(p.level).then(function () { state.volume = Number(p.level); return { level: Number(p.level) }; }); break;
       case 'mute': r = tv.setMute(p.mute !== false).then(function () { state.muted = p.mute !== false; return { mute: state.muted }; }); break;
-      case 'message': showMessage(p.text || '', p.ttl_s != null ? Number(p.ttl_s) : 30); r = Promise.resolve({ shown: true }); break;
+      case 'message': showPopup(p.text || '', p.ttl_s != null ? Number(p.ttl_s) : 30); r = Promise.resolve({ shown: true }); break;
       case 'toast': r = tv.toast(p.text || '').then(function () { return { shown: true }; }); break;
       case 'screenshot': r = uploadScreenshot(cmd.id); break;
       case 'checkout':
         r = tv.checkout().then(null, function (e) { log('platform checkout failed: ' + e.message); }).then(function () {
           try { localStorage.clear(); } catch (e) {}
           state.lastChannel = null; state.prevChannel = null;
-          if (p.message) showMessage(p.message, 20);
+          if (p.message) showPopup(p.message, 20);
           return { checkout: true };
         });
         break;
@@ -529,8 +621,30 @@ function ackViaWs(id, ok, result) {
   if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify({ type: 'ack', command_id: id, ok: ok, result: result }));
   else ackViaHttp(id, ok, result);
 }
+// TV-side events go to the server event log (WS when connected, HTTP batch otherwise, queued
+// while offline) so problems are visible in the admin drawer and the journal.
 function sendEvent(name, payload) {
-  if (state.ws && state.ws.readyState === 1) state.ws.send(JSON.stringify({ type: 'event', name: name, payload: payload }));
+  var ev = { name: name, payload: payload, at: new Date().toISOString() };
+  if (state.ws && state.ws.readyState === 1) { state.ws.send(JSON.stringify({ type: 'event', name: ev.name, payload: ev.payload, at: ev.at })); return; }
+  pendingEvents.push(ev);
+  if (pendingEvents.length > MAX_PENDING_EVENTS) pendingEvents.shift();
+  if (state.setId && state.token && !state.flushTimer) state.flushTimer = setTimeout(flushEvents, 2000);
+}
+function flushEvents() {
+  state.flushTimer = null;
+  if (!pendingEvents.length || !state.setId) return;
+  var batch = pendingEvents.splice(0, pendingEvents.length);
+  if (state.ws && state.ws.readyState === 1) { batch.forEach(function (ev) { state.ws.send(JSON.stringify({ type: 'event', name: ev.name, payload: ev.payload, at: ev.at })); }); return; }
+  request('POST', '/api/tv/events' + authQs(), { events: batch }).then(null, function () {
+    pendingEvents = batch.concat(pendingEvents).slice(-MAX_PENDING_EVENTS);
+    state.flushTimer = setTimeout(flushEvents, 15000);
+  });
+}
+function reportError(kind, message, extra) {
+  log('ERROR ' + kind + ': ' + message);
+  var payload = { kind: kind, message: String(message).slice(0, 500) };
+  if (extra) Object.keys(extra).forEach(function (k) { payload[k] = extra[k]; });
+  sendEvent('error', payload);
 }
 
 // ---------------------------------------------------------------- websocket
@@ -552,9 +666,12 @@ function connectWs() {
   try { ws = new WebSocket(url); } catch (e) { log('ws error: ' + e.message); scheduleWsReconnect(); return; }
   state.ws = ws;
   ws.onopen = function () {
-    state.wsBackoff = 0;
+    var wasDown = state.wsDownSince;
+    state.wsBackoff = 0; state.wsDownSince = null;
     log('ws connected');
     sendHeartbeat(ws);
+    sendEvent('ws', { kind: 'open', reconnect: !!wasDown, down_ms: wasDown ? Date.now() - wasDown : 0 });
+    flushEvents();
     if (state.hbTimer) clearInterval(state.hbTimer);
     state.hbTimer = setInterval(function () { sendHeartbeat(ws); }, 60000);
   };
@@ -564,9 +681,11 @@ function connectWs() {
     if (state.hbTimer) { clearInterval(state.hbTimer); state.hbTimer = null; }
     if (ev && ev.code === 4000) { log('ws replaced by another connection'); return; }
     log('ws closed' + (ev && ev.code ? ' (' + ev.code + ')' : ''));
+    if (!state.wsDownSince) state.wsDownSince = Date.now();
+    sendEvent('ws', { kind: 'close', code: ev && ev.code, reason: ev && ev.reason, clean: !!(ev && ev.wasClean) });
     scheduleWsReconnect();
   };
-  ws.onerror = function () {};
+  ws.onerror = function () { sendEvent('ws', { kind: 'error' }); };
 }
 function scheduleWsReconnect() {
   var waits = [3000, 5000, 10000, 20000, 30000, 60000];
@@ -578,6 +697,7 @@ function onWsMessage(msg) {
   switch (msg.type) {
     case 'hello': break;
     case 'layout':
+      if (msg.power_mode !== undefined) applyPowerMode(msg.power_mode);
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview);
       if (msg.preview) log('preview layout from admin');
@@ -642,7 +762,10 @@ function boot() {
   log('CoopCentric renderer ' + APP_VERSION + ' — detecting platform…');
   try { state.lastChannel = Number(localStorage.getItem('cc_last_channel')) || null; state.prevChannel = state.lastChannel; } catch (e) {}
   document.addEventListener('keydown', onKeyDown, true);
-  tv.on('channel_changed', function (ev) { if (ev && ev.result === false) log('channel_changed error: ' + ev.errorMessage); });
+  tv.on('channel_changed', function (ev) { if (ev && ev.result === false) reportError('channel_changed', ev.errorMessage || 'failed'); });
+  ['play_error', 'media_error', 'media_play_error'].forEach(function (n) { tv.on(n, function (ev) { reportError('media_event', n + ': ' + ((ev && (ev.errorMessage || ev.message)) || JSON.stringify(ev && ev.detail || {}))); }); });
+  ['play_start', 'play_end', 'buffering_start', 'buffering_end', 'network_changed', 'checkout'].forEach(function (n) { tv.on(n, function () { sendEvent('platform', { kind: n }); }); });
+  window.addEventListener('error', function (e) { reportError('js', (e && e.message) || 'script error', { source: e && e.filename, line: e && e.lineno }); });
   tv.on('power_mode_changed', function (ev) { state.powerMode = ev && ev.mode ? String(ev.mode) : state.powerMode; sendEvent('power', { mode: state.powerMode }); });
   document.addEventListener('visibilitychange', function () { sendEvent('visibility', { hidden: !!document.hidden }); });
   tv.detect().then(function (api) {

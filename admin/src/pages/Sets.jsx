@@ -102,6 +102,7 @@ function SetDrawer({ set, groups, layouts, lineups, onClose, onChanged, onDelete
   return (
     <Drawer title={set.room_number ? `Room ${set.room_number}` : 'Unassigned set'} subtitle={`${set.model || 'unknown model'} · ${set.serial}`} onClose={onClose}>
       <div className="inline" style={{ marginBottom: 10 }}><Status online={live.online} ws={live.ws} /><span className="muted small">· last seen {timeAgo(live.last_seen)}</span></div>
+      {live.last_error && <div className="lasterr" role="note"><b>Last TV error</b> <span className="muted small">{timeAgo(live.last_error.at)} · {live.last_error.kind}</span><div className="mono small">{live.last_error.message}</div></div>}
       <dl className="kv">
         <dt>Serial</dt><dd className="mono">{set.serial}</dd>
         <dt>Model</dt><dd>{set.model || '—'}</dd>

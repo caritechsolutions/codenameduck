@@ -9,7 +9,7 @@ function isFactoryRoom(v) { return !v || FACTORY_ROOM.test(String(v)); }
 
 function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
   const resolveLayout = makeLayoutResolver(db);
-  const findGroup = db.prepare('SELECT id, name FROM groups WHERE id = ? AND tenant_id = ?');
+  const findGroup = db.prepare('SELECT id, name, power_mode FROM groups WHERE id = ? AND tenant_id = ?');
   const pendingCommands = db.prepare(`SELECT id, type, payload_json FROM commands
     WHERE set_id = ? AND status IN ('queued','sent') ORDER BY id`);
   const lineupItems = db.prepare(`SELECT c.* FROM lineup_items li JOIN channels c ON c.id = li.channel_id
@@ -49,7 +49,8 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
       set_id: set.id,
       serial: set.serial,
       room_number: set.room_number,
-      group: group || null,
+      group: group ? { id: group.id, name: group.name } : null,
+      power_mode: (group && group.power_mode) || null,
       context: context(tenant, set),
       layout: resolveLayout(tenant, set),
       lineup: lineup.channels,

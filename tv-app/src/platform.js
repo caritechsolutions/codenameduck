@@ -75,7 +75,8 @@ export function detect() {
 
 function wireEvents() {
   var prefix = api === 'idcap' ? 'idcap::' : '';
-  ['channel_changed', 'play_start', 'play_end', 'play_error', 'power_mode_changed', 'checkout', 'network_changed'].forEach(function (name) {
+  ['channel_changed', 'play_start', 'play_end', 'play_error', 'seek_done', 'buffering_start', 'buffering_end',
+   'media_error', 'media_play_error', 'power_mode_changed', 'checkout', 'network_changed'].forEach(function (name) {
     document.addEventListener(prefix + name, function (ev) { emit(name, ev); }, false);
   });
 }
@@ -162,11 +163,13 @@ function mediaPlay(url, mimeType) {
     .then(function () { mediaActive = true; return hcapCall(hcapMedia.play.bind(hcapMedia), { repeatCount: 0 }, TUNE_TIMEOUT_MS); });
 }
 
+// Platform media pipeline (fallback when the HTML5 <video> element cannot play a URL).
+export function platformMediaPlay(url, mimeType) { return mediaStop().then(function () { return mediaPlay(url, mimeType); }); }
+export function platformMediaStop() { return mediaStop(); }
+
 // Tune to a channel object {type, params}. Resolves when video should be up.
 export function tune(ch) {
   if (!api) return Promise.reject(new Error('no platform'));
-  var p = ch.params || {};
-  if (ch.type === 'ip' && p.url) return mediaStop().then(function () { return mediaPlay(p.url, p.mimeType); });
   return mediaStop().then(function () { return requestChannel(channelParams(ch)); });
 }
 export function stopVideo() {
@@ -210,8 +213,11 @@ export function setVolume(level) {
 export function setMute(mute) {
   return api === 'idcap' ? idcapCall('idcap://audio/mute/set', { mute: !!mute }) : Promise.reject(new Error('mute not available in hcap.js'));
 }
+// LG: toastmsg/create takes {msg}, max 162 bytes.
 export function toast(text) {
-  return api === 'idcap' ? idcapCall('idcap://utility/toastmsg/create', { msg: String(text), message: String(text) }) : hcapCall(hcap.system.showToastMessage, { text: String(text) });
+  var msg = String(text);
+  while (unescape(encodeURIComponent(msg)).length > 162) msg = msg.slice(0, -1);
+  return api === 'idcap' ? idcapCall('idcap://utility/toastmsg/create', { msg: msg }) : hcapCall(hcap.system.showToastMessage, { text: msg });
 }
 export function reboot() {
   return api === 'idcap' ? idcapCall('idcap://power/command', { powerCommand: 'reboot' }) : hcapCall(hcap.power.reboot, {});
@@ -226,6 +232,10 @@ export function getPowerMode() {
     if (r.mode !== undefined) return typeof r.mode === 'number' ? (r.mode === 2 ? 'WARM' : 'NORMAL') : String(r.mode);
     return null;
   }, function () { return null; });
+}
+export function setPowerMode(mode) {
+  var m = String(mode).toUpperCase() === 'WARM' ? 'WARM' : 'NORMAL';
+  return api === 'idcap' ? idcapCall('idcap://power/powermode/set', { mode: m }) : hcapCall(hcap.power.setPowerMode, { mode: hcap.power.PowerMode[m] });
 }
 export function launchApp(id, params) {
   return api === 'idcap' ? idcapCall('idcap://application/launch', { id: id, params: params || {} }) : hcapCall(hcap.application.launchApplication, { id: id, parameters: params || {} });

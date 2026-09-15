@@ -124,6 +124,15 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
     res.json({ ok: true, bytes: buf.length });
   });
 
+  // POST /api/tv/events?set_id&token  {events:[{name, payload, at}]} — used while the WebSocket is down.
+  router.post('/events', (req, res) => {
+    const set = authSet(req, res); if (!set) return;
+    const list = Array.isArray((req.body || {}).events) ? req.body.events.slice(0, 50) : [];
+    for (const ev of list) if (ev && typeof ev === 'object') hub.recordTvEvent(req.tenant.id, set.id, ev);
+    touchSet.run(clientIp(req), set.id);
+    res.json({ ok: true, recorded: list.length });
+  });
+
   // GET /api/tv/weather?set_id&token — current conditions for the tenant's configured location.
   router.get('/weather', async (req, res) => {
     const set = authSet(req, res); if (!set) return;

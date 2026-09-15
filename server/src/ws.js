@@ -73,7 +73,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
     // only pushes real changes from here on.
     try {
       const st = state.build(tenant, set);
-      conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context);
+      conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.power_mode || '');
       conn.sent.lineup = JSON.stringify(st.lineup);
       conn.sent.messages = JSON.stringify(st.messages);
     } catch (e) { log(`ws: state build failed for set ${set.id}: ${e.message}`); }
@@ -102,12 +102,20 @@ function createHub({ db, tenants, state, log = () => {} }) {
       if (commands) commands.ack(conn.setId, Number(msg.command_id), !!msg.ok, msg.result);
       insertEvent.run(conn.tenantId, conn.setId, 'command_ack', JSON.stringify({ command_id: msg.command_id, ok: !!msg.ok }));
     } else if (msg.type === 'event') {
-      insertEvent.run(conn.tenantId, conn.setId, 'tv_' + String(msg.name || 'event').slice(0, 32), JSON.stringify(msg.payload || null).slice(0, 4000));
+      recordTvEvent(conn.tenantId, conn.setId, msg);
     } else if (msg.type === 'ping') {
       sendJson(conn.ws, { type: 'pong' });
     }
   }
 
+  // TV-side events (errors, media, ws lifecycle). Errors also go to the journal.
+  function recordTvEvent(tenantId, setId, ev) {
+    const name = 'tv_' + String(ev.name || 'event').replace(/[^a-z0-9_]/gi, '').slice(0, 32);
+    const payload = ev.payload && typeof ev.payload === 'object' ? { ...ev.payload } : { value: ev.payload };
+    if (ev.at) payload.at = String(ev.at).slice(0, 32);
+    insertEvent.run(tenantId, setId, name, JSON.stringify(payload).slice(0, 4000));
+    if (name === 'tv_error') log(`TV ERROR set ${setId}: [${payload.kind || '?'}] ${payload.message || ''}`);
+  }
   function sendJson(ws, obj) { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)); }
 
   function send(setId, obj) { const c = conns.get(setId); if (!c) return false; sendJson(c.ws, obj); return true; }
@@ -127,10 +135,10 @@ function createHub({ db, tenants, state, log = () => {} }) {
       if (!set) continue;
       const st = state.build(tenant, set);
       let touched = false;
-      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context);
+      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.power_mode || '');
       if (force || c.sent.layout !== layoutKey) {
         c.sent.layout = layoutKey;
-        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group });
+        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, power_mode: st.power_mode });
         touched = true;
       }
       const lineupKey = JSON.stringify(st.lineup);
@@ -163,7 +171,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
 
   function closeAll() { for (const c of conns.values()) { try { c.ws.terminate(); } catch { /* ignore */ } } conns.clear(); wss.close(); }
 
-  return { attach, send, isConnected, connectedSetIds, refresh, preview, closeAll,
+  return { attach, send, isConnected, connectedSetIds, refresh, preview, closeAll, recordTvEvent,
     setCommands(c) { commands = c; }, get size() { return conns.size; } };
 }
 

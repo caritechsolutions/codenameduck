@@ -63,9 +63,16 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
   const qGroup = db.prepare('SELECT id FROM groups WHERE id = ? AND tenant_id = ?');
   const qLayout = db.prepare('SELECT id FROM layouts WHERE id = ? AND tenant_id = ?');
 
+  const qLastError = db.prepare(`SELECT payload_json, created_at FROM events WHERE set_id = ? AND type = 'tv_error' ORDER BY id DESC LIMIT 1`);
+  function lastError(setId) {
+    const e = qLastError.get(setId);
+    if (!e) return null;
+    const p = safe(e.payload_json) || {};
+    return { kind: p.kind || null, message: p.message || null, at: e.created_at };
+  }
   function setToApi(s) {
     const { token, ...rest } = s;
-    return { ...rest, online: !!s.online, ws: hub.isConnected(s.id), reported_room_is_factory: isFactoryRoom(s.reported_room) };
+    return { ...rest, online: !!s.online, ws: hub.isConnected(s.id), reported_room_is_factory: isFactoryRoom(s.reported_room), last_error: lastError(s.id) };
   }
   function loadSet(req, res) {
     const s = qSet.get(Number(req.params.id), req.tenant.id);
@@ -150,8 +157,13 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     const b = req.body || {};
     const name = 'name' in b ? String(b.name || '').trim().slice(0, 80) : g.name;
     if (!name) return res.status(400).json({ error: 'name required' });
+    let powerMode = g.power_mode;
+    if ('power_mode' in b) {
+      if (b.power_mode != null && !['NORMAL', 'WARM'].includes(b.power_mode)) return res.status(400).json({ error: 'power_mode must be NORMAL, WARM or null' });
+      powerMode = b.power_mode || null;
+    }
     try {
-      db.prepare('UPDATE groups SET name = ?, description = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, g.id);
+      db.prepare('UPDATE groups SET name = ?, description = ?, power_mode = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, powerMode, g.id);
     } catch (e) { return res.status(409).json({ error: 'a group with that name exists' }); }
     if ('layout_id' in b) assignLayout(req, g.id, b.layout_id, res, true);
     hub.refresh(req.tenant.id);

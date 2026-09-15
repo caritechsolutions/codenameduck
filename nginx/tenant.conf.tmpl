@@ -8,6 +8,18 @@ server {
 
     # Static tree the TV reads (xait.xml + app). Served by nginx alone so the TV keeps
     # booting even if the Node service is down.
+    # xait.xml and index.html must never be cached (they are how updates reach the set);
+    # the LG libraries and the content-hashed app bundle can be cached for a long time so a
+    # power cycle boots fast.
+    location = /procentric/application/xait.xml {
+        add_header Cache-Control "no-store";
+    }
+    location /procentric/application/lib/ {
+        add_header Cache-Control "public, max-age=2592000, immutable";
+    }
+    location ~ "^/procentric/application/app\.[0-9a-f]{8,}\.js$" {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
     location /procentric/ {
         autoindex off;
         add_header Cache-Control "no-store";

@@ -67,12 +67,14 @@ test('remote keys: CH+/- walk the lineup, digits tune by number, PORTAL toggles 
   await s.key(0x1AB); // CH_UP
   await s.page.waitForFunction(() => window.__fake.channel && window.__fake.channel.ip === '239.1.1.7', null, { timeout: 5000 });
   assert.match(await s.current(), /7\s*Sports/);
-  await s.key(0x1AB); // → 9 = HLS url → media path
-  await s.page.waitForFunction(() => window.__fake.media && window.__fake.media.url === 'http://media.test/m.m3u8', null, { timeout: 5000 });
+  await s.key(0x1AB); // → 9 = HLS url → HTML5 <video> first; unreachable here → platform media fallback
+  await s.page.waitForFunction(() => window.__fake.media && window.__fake.media.url === 'http://media.test/m.m3u8', null, { timeout: 20000 });
   let f = await s.fake();
   assert.equal(f.media.mimeType, 'application/x-mpegURL');
   const uris = f.calls.map((c) => c.uri);
   assert.ok(uris.includes('idcap://tv/media/startup') && uris.includes('idcap://tv/media/create') && uris.includes('idcap://tv/media/control'));
+  assert.ok(await s.page.$('#zone-tv video.urlvideo'), 'video element lives inside the video zone');
+  assert.ok(s.logs.some((l) => /ERROR media: HTML5 video failed/.test(l)), 'HTML5 failure reported');
   await s.key(0x1AB); // wraps to 5 → media must be torn down before tuning
   await s.page.waitForFunction(() => window.__fake.channel && window.__fake.channel.ip === '239.1.1.5' && window.__fake.media === null, null, { timeout: 5000 });
   f = await s.fake();
@@ -80,7 +82,7 @@ test('remote keys: CH+/- walk the lineup, digits tune by number, PORTAL toggles 
   const i = after.lastIndexOf('idcap://tv/channel/change/request');
   assert.ok(after.slice(0, i).includes('idcap://tv/media/destroy') && after.slice(0, i).includes('idcap://tv/media/shutdown'), 'destroy+shutdown before channel change');
   await s.key(0x1AC); // CH_DOWN wraps to 9
-  await s.page.waitForFunction(() => window.__fake.media && window.__fake.media.url, null, { timeout: 5000 });
+  await s.page.waitForFunction(() => window.__fake.media && window.__fake.media.url, null, { timeout: 20000 });
 
   // digits: "7" then wait → tunes 7; shows digits overlay meanwhile
   await s.key(0x37);
@@ -95,11 +97,14 @@ test('remote keys: CH+/- walk the lineup, digits tune by number, PORTAL toggles 
 
   // PORTAL → fullscreen screen: only the video zone stays; PORTAL again → home
   await s.key(0x25A);
-  await sleep(100);
+  await sleep(150);
   assert.deepEqual(await s.page.$$eval('#stage .zone', (els) => els.map((e) => e.id)), ['zone-tv']);
+  assert.deepEqual(await s.page.$eval('#zone-tv', (e) => [e.style.left, e.style.top, e.style.width, e.style.height]), ['0px', '0px', '1920px', '1080px'], 'fullscreen screen expands the video zone');
+  assert.deepEqual((await s.fake()).videoSize, { x: 0, y: 0, width: 1920, height: 1080 }, 'tuner video repositioned to full OSD');
   await s.key(0x25A);
-  await sleep(100);
+  await sleep(150);
   assert.ok((await s.page.$$eval('#stage .zone', (els) => els.map((e) => e.id))).includes('zone-chlist'));
+  assert.deepEqual((await s.fake()).videoSize, { x: 640, y: 120, width: 1200, height: 675 });
   // menu: DOWN focuses second item, ENTER opens the hidden html page, BACK closes it
   await s.key(0x28); await s.key(0x28);
   assert.equal(await s.page.$eval('#zone-menu .menuitem.focused', (e) => e.textContent), 'Info page');
@@ -128,8 +133,12 @@ test('commands: tune, volume, mute, message, toast, screenshot upload, reboot, l
   c = await cmd('volume', { level: 33 }); assert.equal((await waitAck(c.id)).status, 'acked'); assert.equal((await s.fake()).volume, 33);
   c = await cmd('mute', { mute: true }); assert.equal((await waitAck(c.id)).status, 'acked'); assert.equal((await s.fake()).mute, true);
   c = await cmd('message', { text: 'Fire drill at 10:00', ttl_s: 60 }); assert.equal((await waitAck(c.id)).status, 'acked');
-  assert.equal(await s.page.$eval('.message.show', (e) => e.textContent), 'Fire drill at 10:00');
+  assert.equal(await s.page.$eval('.popup.show', (e) => e.textContent), 'Fire drill at 10:00');
+  const pr = await s.page.$eval('.popup.show', (e) => { const r = e.getBoundingClientRect(); return [r.top >= 0, r.bottom <= window.innerHeight, r.width > 0]; });
+  assert.deepEqual(pr, [true, true, true], 'popup is inside the viewport');
   c = await cmd('toast', { text: 'hi' }); assert.equal((await waitAck(c.id)).status, 'acked'); assert.deepEqual((await s.fake()).toasts, ['hi']);
+  const toastCall = (await s.fake()).calls.find((x) => x.uri === 'idcap://utility/toastmsg/create');
+  assert.deepEqual(Object.keys(toastCall.p), ['msg']);
   c = await cmd('screenshot', {});
   const shot = await waitAck(c.id);
   assert.equal(shot.status, 'acked', JSON.stringify(shot.result));

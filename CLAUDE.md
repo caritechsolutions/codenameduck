@@ -274,3 +274,14 @@ Decisions already made (do not re-open):
   refusal becomes a failed command + journal line. The renderer no longer applies it on its own.
 - HTML5 channels: `system/nosignalimage/set off` before playing and no `url('TV:')` hole on the
   video host; tuner channels restore `default` and the hole.
+
+### Part A2 — hardware corrections (2026-09-16)
+
+- `configuration/property/set` accepts **string values only** (TV: `'value' is not string
+  type`); `platform.setProperty` always sends strings, `setPropertyVerified` writes the string,
+  reads back, and only tries a number as a last resort. Expect instant_power acks to read `"1"`.
+- The "No Signal" text over an HLS-only layout was LG's *external-input* OSD: the set was on
+  HDMI. `ensureTvInput()` runs at boot and before every HTML5 channel: `externalinput/get`, and
+  if `type` ≠ `TV` → `externalinput/set {type:"TV", index:0}` + `tv_input` event. HCAP:
+  `hcap.externalinput.getCurrentExternalInput/setCurrentExternalInput` ({type: enum, index}).
+- HCAP no-signal call is `hcap.system.setNoSignalImage({ noSignalImage: false })` (boolean).

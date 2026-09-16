@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -20,10 +20,13 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
         case 'idcap://configuration/property/get': (p.key in f.props) ? ok({ value: f.props[p.key] }) : fail('no such key'); break;
         case 'idcap://configuration/property/set': {
           var rules = f.propertyRules || {};
+          if (typeof p.value !== 'string') { fail("'value' is not string type"); break; }   // real LG behaviour (43UM670H0UA)
           if ((rules.readonly || []).indexOf(p.key) >= 0) { fail('property is read only'); break; }
-          if ((rules.numericOnly || []).indexOf(p.key) >= 0 && typeof p.value !== 'number') { ok(); break; }   // TV "accepts" but keeps the old value
+          if ((rules.sticky || []).indexOf(p.key) >= 0) { ok(); break; }   // TV accepts the call but keeps the old value
           f.props[p.key] = p.value; ok(); break;
         }
+        case 'idcap://externalinput/get': ok({ type: f.input.type, index: f.input.index }); break;
+        case 'idcap://externalinput/set': f.input = { type: p.type, index: p.index }; f.inputSets = (f.inputSets || 0) + 1; ok(); break;
         case 'idcap://system/nosignalimage/set': f.noSignal = p.mode; ok(); break;
         case 'idcap://system/nosignalimage/get': ok({ mode: f.noSignal || 'default' }); break;
         case 'idcap://tv/channel/change/request': f.channel = p; f.media = null; ok(); setTimeout(function () { window.__fakeEvent('idcap::channel_changed', { result: true }); }, 30); break;

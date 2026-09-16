@@ -275,6 +275,22 @@ function setNoSignal(mode) {
   state.noSignalMode = mode;
   return tv.setNoSignalImage(mode).then(function () { log('nosignalimage ' + mode); }, function (e) { state.noSignalMode = null; reportError('nosignal', 'nosignalimage/set ' + mode + ': ' + e.message); });
 }
+// Make sure the set's A/V source is the tuner ("TV"), not an HDMI input: at boot and before any
+// HTML5 channel. LG's external-input OSD ("check the power of the external devices…") sits above
+// the page and nosignalimage/set does nothing about it.
+function ensureTvInput() {
+  if (!state.api) return Promise.resolve();
+  return tv.getExternalInput().then(function (cur) {
+    state.input = cur;
+    if (cur && cur.type === 'TV') return cur;
+    return tv.setExternalInput('TV', 0).then(function () {
+      log('input switched to TV (was ' + (cur && cur.type ? cur.type + (cur.index != null ? ' ' + cur.index : '') : '?') + ')');
+      sendEvent('input', { from: cur ? cur.type : null, from_index: cur ? cur.index : null, to: 'TV', index: 0 });
+      state.input = { type: 'TV', index: 0 };
+      return state.input;
+    });
+  }, function (e) { reportError('input', 'externalinput/get: ' + e.message); }).then(null, function (e) { reportError('input', 'externalinput/set TV: ' + e.message); });
+}
 function setHostMode(html5) {
   ensureVideoHost();
   var tvUrl = "url('TV:')";
@@ -424,7 +440,7 @@ function tuneTo(ch) {
   if (!state.api) return Promise.resolve(true);
   var token = state.tuning = {};
   var run;
-  if (isUrlChannel(ch)) { setHostMode(true); run = setNoSignal('off').then(function () { return playUrlChannel(ch); }); }
+  if (isUrlChannel(ch)) { setHostMode(true); run = ensureTvInput().then(function () { return setNoSignal('off'); }).then(function () { return playUrlChannel(ch); }); }
   else { htmlVideoStop(); setHostMode(false); run = setNoSignal('default').then(function () { return state.mediaMode === 'platform' ? tv.platformMediaStop() : Promise.resolve(); }).then(function () { state.mediaMode = null; return tv.tune(ch); }); }
   return run.then(function () {
     if (state.tuning !== token) return false;
@@ -846,8 +862,9 @@ function readProperties() {
     .then(function () { return tv.getPowerMode(); }).then(function (pm) { state.powerMode = pm; });
 }
 function preparePlatform() {
-  // Claim the keys the lineup needs; leave VOL/MUTE with the TV firmware.
-  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {});
+  // Claim the keys the lineup needs; leave VOL/MUTE with the TV firmware. Then make sure the
+  // set is on the TV input so no external-input OSD covers the layout.
+  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput);
 }
 function boot() {
   fitStage({ w: 1920, h: 1080 });

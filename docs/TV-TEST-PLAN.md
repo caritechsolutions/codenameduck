@@ -180,3 +180,17 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
    starting an HTML5 channel and `default` before a tuner channel). Zap to a multicast channel
    and back: the OSD state follows. If the OSD still appears on HLS, tell me: the fallback is to
    park the tuner on a stopped multicast channel as a silent background source.
+
+## Phase 3 Part A2 — instant_power as string, external input
+
+1. **Instant On.** Groups → Instant On. The set's drawer shows `set_property {instant_power: 1}`
+   → `acked` with result `value: "1", sent_as: string` (the TV only accepts string property
+   values). The Power line shows "Instant On on" after the next heartbeat. Remote power off/on:
+   the app must be back instantly. Then set Normal and confirm `value: "0"`.
+2. **No external-input OSD.** Put the set on an HDMI input (INPUT key), then reload the app
+   (drawer → Reload app) or power-cycle: the renderer must switch the set back to TV before the
+   HLS channel starts; the layout appears without LG's "check the power of the external devices"
+   message. The drawer's events show `tv_input {from: "HDMI", to: "TV"}`. A set already on TV
+   logs nothing.
+3. HLS-only lineup power-cycle again: no OSD of either kind (`nosignalimage/set off` still runs
+   for the tuner case).

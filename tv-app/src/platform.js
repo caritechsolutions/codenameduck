@@ -86,33 +86,49 @@ export function getProperty(key) {
   var p = api === 'idcap' ? idcapCall('idcap://configuration/property/get', { key: key }) : hcapCall(hcap.property.getProperty, { key: key });
   return p.then(function (r) { return r && r.value !== undefined ? r.value : null; }, function () { return null; });
 }
-// value is passed as given (number stays a number) so callers can try the type LG expects.
-export function setProperty(key, value) {
-  var v = typeof value === 'number' ? value : String(value);
+// LG: configuration/property/set only accepts string values ("'value' is not string type"
+// otherwise, verified on the 43UM670H0UA). Always send strings.
+export function setProperty(key, value, raw) {
+  var v = raw ? value : String(value);
   return api === 'idcap' ? idcapCall('idcap://configuration/property/set', { key: key, value: v })
     : hcapCall(hcap.property.setProperty, { key: key, value: v });
 }
-// Set a property and read it back; if the TV kept the old value, retry with the other type
-// (string ↔ number). Rejects with the read-back value when nothing sticks.
+// Set a property (as a string) and read it back. Only if the TV accepted the call but kept the
+// old value is a numeric write tried as a last resort. Rejects with the read-back value.
 export function setPropertyVerified(key, value) {
   var wanted = String(value);
-  var attempt = function (v) {
-    return setProperty(key, v).then(function () { return getProperty(key); }).then(function (back) { return { ok: back != null && String(back) === wanted, back: back, sent: v }; });
+  var attempt = function (v, raw) {
+    return setProperty(key, v, raw).then(function () { return getProperty(key); }).then(function (back) { return { ok: back != null && String(back) === wanted, back: back, sent: v }; });
   };
-  return attempt(value).then(function (r) {
+  return attempt(wanted, false).then(function (r) {
     if (r.ok) return r;
-    var alt = typeof value === 'number' ? String(value) : (/^-?\d+$/.test(wanted) ? Number(value) : null);
-    if (alt === null) throw new Error('TV kept ' + key + '=' + r.back + ' after set ' + wanted);
-    return attempt(alt).then(function (r2) {
+    if (!/^-?\d+$/.test(wanted)) throw new Error('TV kept ' + key + '=' + r.back + ' after set "' + wanted + '"');
+    return attempt(Number(wanted), true).then(function (r2) {
       if (r2.ok) return r2;
-      throw new Error('TV kept ' + key + '=' + r2.back + ' after set ' + wanted + ' (tried ' + typeof value + ' and ' + typeof alt + ')');
-    });
+      throw new Error('TV kept ' + key + '=' + r2.back + ' after set "' + wanted + '" (tried string, then number)');
+    }, function (e) { throw new Error('TV kept ' + key + '=' + r.back + ' after set "' + wanted + '"; numeric retry: ' + e.message); });
   });
 }
 // LG draws its own "No Signal" OSD when the tuner has no channel; switch it off while an HTML5
-// stream is the picture. modes: 'off' | 'default' (IDPN 100+).
+// stream is the picture. IDCAP: mode 'off' | 'default'. HCAP 1.21: { noSignalImage: boolean }.
 export function setNoSignalImage(mode) {
-  return api === 'idcap' ? idcapCall('idcap://system/nosignalimage/set', { mode: mode }) : hcapCall(hcap.system.setNoSignalImage, { mode: mode });
+  return api === 'idcap' ? idcapCall('idcap://system/nosignalimage/set', { mode: mode }) : hcapCall(hcap.system.setNoSignalImage, { noSignalImage: mode !== 'off' });
+}
+// Current A/V input. The set can sit on an HDMI input (LG then shows its "check the external
+// device" OSD above the page); the renderer needs it on TV. Returns { type: 'TV'|'HDMI'|..., index }.
+var HCAP_INPUT_NAMES = null;
+function hcapInputName(n) {
+  if (!HCAP_INPUT_NAMES) { HCAP_INPUT_NAMES = {}; var e = hcap.externalinput.ExternalInputType; Object.keys(e).forEach(function (k) { HCAP_INPUT_NAMES[e[k]] = k; }); }
+  return HCAP_INPUT_NAMES[n] || String(n);
+}
+export function getExternalInput() {
+  if (api === 'idcap') return idcapCall('idcap://externalinput/get', {}).then(function (r) { return { type: r && r.type != null ? String(r.type).toUpperCase() : null, index: r && r.index != null ? Number(r.index) : null }; });
+  return hcapCall(hcap.externalinput.getCurrentExternalInput, {}).then(function (r) { return { type: r && r.type != null ? hcapInputName(r.type) : null, index: r && r.index != null ? Number(r.index) : null }; });
+}
+export function setExternalInput(type, index) {
+  var t = String(type || 'TV').toUpperCase(), i = Number(index || 0);
+  return api === 'idcap' ? idcapCall('idcap://externalinput/set', { type: t, index: i })
+    : hcapCall(hcap.externalinput.setCurrentExternalInput, { type: hcap.externalinput.ExternalInputType[t] || hcap.externalinput.ExternalInputType.TV, index: i });
 }
 
 // ------------------------------------------------------------------ video / tuning

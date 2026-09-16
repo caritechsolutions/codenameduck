@@ -52,24 +52,26 @@ test('renderer registers exactly the shared zone types and a layout with all of 
   await s.page.close();
 });
 
-test('instant_power: WARM group → set_property command, verified write, acked, reported; numeric-only TV → retried as number; refusing TV → failed + tv_error', async (t) => {
+test('instant_power: sent as a string, read back "1", acked; sticky TV → numeric last resort fails cleanly; refusing TV → failed + tv_error', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
-  // 1) TV accepts strings
+  // 1) real LG behaviour: only strings are accepted → one string write, read back "1"
   let s = await boot(t, { powerMode: 'WARM' });
   let c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
-  assert.equal(c.status, 'acked', JSON.stringify(c)); assert.equal(c.result.value, '1');
-  assert.equal(String((await s.fake()).props.instant_power), '1');
+  assert.equal(c.status, 'acked', JSON.stringify(c)); assert.equal(c.result.value, '1'); assert.equal(c.result.sent_as, 'string');
+  let f = await s.fake();
+  const writes = f.calls.filter((x) => x.uri === 'idcap://configuration/property/set' && x.p.key === 'instant_power');
+  assert.equal(writes.length, 1, 'string first, no numeric attempt needed'); assert.equal(writes[0].p.value, '1');
+  assert.equal(f.props.instant_power, '1');
   await sleep(300);
   assert.equal(s.stack.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(s.set.id).instant_power, 1, 'heartbeat carried it');
-  assert.equal((await s.fake()).calls.filter((x) => x.uri === 'idcap://power/powermode/set').length, 0);
+  assert.equal(f.calls.filter((x) => x.uri === 'idcap://power/powermode/set').length, 0);
   await s.page.close();
-  // 2) TV silently ignores strings, wants a number
-  s = await boot(t, { powerMode: 'WARM', fakeOverrides: { __propertyRules: { numericOnly: ['instant_power'] } } });
+  // 2) TV accepts the string but keeps the old value → numeric retry is refused → failed with both reasons
+  s = await boot(t, { powerMode: 'WARM', fakeOverrides: { __propertyRules: { sticky: ['instant_power'] } } });
   c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
-  assert.equal(c.status, 'acked', JSON.stringify(c)); assert.equal(c.result.sent_as, 'number');
-  assert.equal((await s.fake()).props.instant_power, 1);
+  assert.equal(c.status, 'failed'); assert.match(c.result.error, /kept instant_power=0/); assert.match(c.result.error, /not string type/);
   await s.page.close();
-  // 3) TV refuses: command failed with the reason, tv_error logged, visible as last_error
+  // 3) TV refuses outright: failed with the TV's reason, journal line, drawer event
   s = await boot(t, { powerMode: 'WARM', fakeOverrides: { __propertyRules: { readonly: ['instant_power'] } } });
   c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
   assert.equal(c.status, 'failed'); assert.match(c.result.error, /read only/);
@@ -77,6 +79,28 @@ test('instant_power: WARM group → set_property command, verified write, acked,
   const detail = (await s.stack.api('GET', `/api/admin/sets/${s.set.id}`, undefined, s.cookie)).json;
   assert.ok(s.stack.logs.some((l) => /set_property FAILED/.test(l)));
   assert.ok(detail.events.some((e) => e.type === 'command_ack' && e.payload.ok === false));
+  await s.page.close();
+});
+
+test('external input: a set on HDMI is switched to TV at boot (before the HTML5 channel) and logged; a set already on TV is left alone', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  let s = await boot(t, { fakeOverrides: { __input: { type: 'HDMI', index: 1 } } });
+  await s.page.waitForFunction(() => window.__fake.input.type === 'TV', null, { timeout: 8000 });
+  let f = await s.fake();
+  assert.deepEqual(f.input, { type: 'TV', index: 0 });
+  const seq = f.calls.map((c) => c.uri);
+  assert.ok(seq.indexOf('idcap://externalinput/set') < seq.indexOf('idcap://tv/media/create') || seq.indexOf('idcap://tv/media/create') < 0);
+  assert.ok(seq.indexOf('idcap://externalinput/get') < seq.indexOf('idcap://tv/channel/startchannel/set'), 'input checked at boot, before tuning');
+  await sleep(400);
+  const detail = (await s.stack.api('GET', `/api/admin/sets/${s.set.id}`, undefined, s.cookie)).json;
+  const ev = detail.events.find((e) => e.type === 'tv_input');
+  assert.ok(ev, 'tv_input event recorded'); assert.equal(ev.payload.from, 'HDMI'); assert.equal(ev.payload.to, 'TV');
+  await s.page.close();
+  s = await boot(t);
+  await sleep(500);
+  f = await s.fake();
+  assert.ok(f.calls.some((c) => c.uri === 'idcap://externalinput/get'));
+  assert.equal(f.inputSets || 0, 0, 'no externalinput/set when already on TV');
   await s.page.close();
 });
 

@@ -161,3 +161,22 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
 6. **Channel forms.** New fields: IP multicast has Source address (IGMPv3) and Video codec
    (MPEG2/H264/HEVC); RF has Video codec and, for terrestrial_2 (DVB-T2), PLP ID. Try HEVC on a
    multicast channel if you have one; CSV export/import carries the new columns.
+
+## Phase 3 Part A — fixes from the 3c hardware test
+
+1. **Banner zone saves.** Layouts → add zone "banner" (or "digits"/"popup") → Save & publish
+   must succeed (the block was the admin's own validator, not the server). All three lists —
+   renderer, admin, server — now read `shared/zone-types.json`.
+2. **Instant On is now a visible command.** Groups → Instant On. Open each set's drawer: a
+   `set_property {instant_power: 1}` command appears, goes `sent` → `acked` (result shows the
+   value the TV read back and whether it took a number or a string) or `failed` with the TV's
+   reason (also in the journal as `command #N set_property FAILED …`). The renderer writes,
+   reads back, and if the value did not stick retries with the other type. After `acked`, the
+   drawer's Power line shows "Instant On on" on the next heartbeat. A set that later registers
+   reporting 0 while its group says WARM gets the command again automatically. Tell me the
+   result text: `sent_as: number` or `string` is the answer to LG's value-type question.
+3. **No "No Signal" over the layout.** With an HLS-only lineup, power-cycle the set: the layout
+   must come up without LG's No Signal OSD (the renderer calls `nosignalimage/set off` before
+   starting an HTML5 channel and `default` before a tuner channel). Zap to a multicast channel
+   and back: the OSD state follows. If the OSD still appears on HLS, tell me: the fallback is to
+   park the tuner on a stopped multicast channel as a silent background source.

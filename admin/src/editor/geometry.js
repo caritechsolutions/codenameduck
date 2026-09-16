@@ -2,7 +2,8 @@
 export const GRID = 10;
 export const MIN_SIZE = 40;
 export const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
-export const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher', 'banner', 'digits', 'popup'];
+import SHARED_ZONE_TYPES from '../../../shared/zone-types.json';
+export const ZONE_TYPES = SHARED_ZONE_TYPES;   // shared/zone-types.json
 export const PLACEMENT_TYPES = ['banner', 'digits', 'popup'];   // position/style of the renderer's OSD elements
 export const ACTIONS = ['toggle_menu', 'fullscreen_tv', 'home', 'show_page', 'close_page', 'launch_app', 'tune', 'reload'];
 export const KEY_NAMES = ['PORTAL', 'GUIDE', 'BACK', 'EXIT', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'MENU', 'INFO'];

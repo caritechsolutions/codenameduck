@@ -1,6 +1,7 @@
 // Client-side mirror of server/src/layout.js validateLayout — enough to give instant feedback
 // while typing; the server re-validates on save.
-export const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher'];
+import SHARED_ZONE_TYPES from '../../shared/zone-types.json';
+export const ZONE_TYPES = SHARED_ZONE_TYPES;   // single source of truth shared with server and renderer
 
 export function validateLayoutText(text) {
   let doc;

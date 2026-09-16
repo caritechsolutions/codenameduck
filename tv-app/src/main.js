@@ -5,6 +5,7 @@
 /* global __APP_VERSION__ */
 import * as tv from './platform.js';
 import { KEY, KEY_NAME } from './platform.js';
+import ZONE_TYPES from '../../shared/zone-types.json';
 
 var APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number', 'instant_power'];
@@ -266,6 +267,20 @@ function ensureVideoHost() {
   stage.insertBefore(videoHost, stage.firstChild);
   return videoHost;
 }
+// LG's own "No Signal" OSD sits above the page whenever the tuner has no channel; turn it off
+// while an HTML5 stream is the picture and restore it for tuner channels. The url('TV:') hole
+// is also removed in HTML5 mode so nothing of the tuner plane shows through.
+function setNoSignal(mode) {
+  if (!state.api || state.noSignalMode === mode) return Promise.resolve();
+  state.noSignalMode = mode;
+  return tv.setNoSignalImage(mode).then(function () { log('nosignalimage ' + mode); }, function (e) { state.noSignalMode = null; reportError('nosignal', 'nosignalimage/set ' + mode + ': ' + e.message); });
+}
+function setHostMode(html5) {
+  ensureVideoHost();
+  var tvUrl = "url('TV:')";
+  if (html5) { videoHost.style.backgroundImage = 'none'; videoHost.style.background = '#000'; videoHost.setAttribute('data-mode', 'html5'); }
+  else { videoHost.style.backgroundImage = tvUrl; videoHost.style.background = tvUrl; videoHost.setAttribute('data-mode', 'tuner'); }
+}
 function positionVideoHost(r) {
   ensureVideoHost();
   videoHost.style.left = r.x + 'px'; videoHost.style.top = r.y + 'px'; videoHost.style.width = r.w + 'px'; videoHost.style.height = r.h + 'px';
@@ -377,6 +392,7 @@ function playUrlChannel(ch) {
     reportError('media', 'HTML5 video failed for ' + ch.params.url + ': ' + e.message + ' — trying platform media player');
     htmlVideoStop();
     if (!state.api) throw e;
+    setHostMode(false);   // LG's pipeline draws on the TV plane: the hole must be back
     return tv.platformMediaPlay(ch.params.url, ch.params.mimeType).then(function () { state.mediaMode = 'platform'; return true; });
   });
 }
@@ -408,8 +424,8 @@ function tuneTo(ch) {
   if (!state.api) return Promise.resolve(true);
   var token = state.tuning = {};
   var run;
-  if (isUrlChannel(ch)) run = playUrlChannel(ch);
-  else { htmlVideoStop(); run = (state.mediaMode === 'platform' ? tv.platformMediaStop() : Promise.resolve()).then(function () { state.mediaMode = null; return tv.tune(ch); }); }
+  if (isUrlChannel(ch)) { setHostMode(true); run = setNoSignal('off').then(function () { return playUrlChannel(ch); }); }
+  else { htmlVideoStop(); setHostMode(false); run = setNoSignal('default').then(function () { return state.mediaMode === 'platform' ? tv.platformMediaStop() : Promise.resolve(); }).then(function () { state.mediaMode = null; return tv.tune(ch); }); }
   return run.then(function () {
     if (state.tuning !== token) return false;
     log('tuned ' + ch.number + ' ' + ch.name + (state.mediaMode ? ' (' + state.mediaMode + ')' : ''));
@@ -612,26 +628,8 @@ function applyMessages(messages) {
   var m = state.messages[0];
   if (m) showMessage(m.text, 0); else hideMessage();
 }
-// Instant On: LG only allows NORMAL↔WARM once the instant_power property is 1, and the TV then
-// handles WARM itself on the remote's power key. So the group setting writes instant_power
-// (1 = WARM group, 0 = NORMAL) and never calls powermode/set.
-function applyInstantPower(want) {
-  if (want == null || !state.api) return;
-  var target = Number(want) ? '1' : '0';
-  var current = state.props.instant_power == null ? null : String(state.props.instant_power);
-  if (current === target || state.instantPowerBusy) return;
-  state.instantPowerBusy = true;
-  tv.setProperty('instant_power', target).then(function () { return tv.getProperty('instant_power'); }).then(function (v) {
-    state.instantPowerBusy = false;
-    state.props.instant_power = v == null ? target : String(v);
-    log('instant_power -> ' + state.props.instant_power);
-    sendEvent('instant_power', { value: state.props.instant_power });
-    if (state.ws && state.ws.readyState === 1) sendHeartbeat(state.ws);
-  }, function (e) { state.instantPowerBusy = false; reportError('instant_power', 'property/set instant_power=' + target + ': ' + e.message); });
-}
 function applyState(data) {
   state.context = data.context || { hotel: '', room: data.room_number || '', guest: '', serial: state.props.serial_number || '' };
-  if (data.instant_power !== undefined) applyInstantPower(data.instant_power);
   applyLayout(data.layout, state.context);
   applyLineup(data.lineup);
   if (data.messages) applyMessages(data.messages);
@@ -669,7 +667,12 @@ function runCommand(cmd, ack) {
   try {
     switch (cmd.type) {
       case 'set_property':
-        r = tv.setProperty(p.key, p.value).then(function () { if (p.key === 'room_number') state.props.room_number = p.value; return { key: p.key }; });
+        r = tv.setPropertyVerified(p.key, p.value).then(function (res) {
+          state.props[p.key] = res.back == null ? String(p.value) : String(res.back);
+          if (p.key === 'instant_power') sendEvent('instant_power', { value: state.props.instant_power, sent_as: typeof res.sent });
+          if (state.ws && state.ws.readyState === 1) sendHeartbeat(state.ws);
+          return { key: p.key, value: state.props[p.key], sent_as: typeof res.sent };
+        });
         break;
       case 'reload_app': r = Promise.resolve({ reloading: true }); setTimeout(function () { window.location.reload(); }, 500); break;
       case 'reboot': r = tv.reboot().then(function () { return { rebooting: true }; }); break;
@@ -788,7 +791,6 @@ function onWsMessage(msg) {
   switch (msg.type) {
     case 'hello': break;
     case 'layout':
-      if (msg.instant_power !== undefined) applyInstantPower(msg.instant_power);
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview);
       if (msg.preview) log('preview layout from admin');
@@ -876,5 +878,12 @@ function boot() {
 }
 window.addEventListener('resize', function () { if (state.layout) render(); });
 document.addEventListener('DOMContentLoaded', boot);
+// Every shared zone type must have a drawer and vice versa (shared/zone-types.json).
+(function () {
+  var have = Object.keys(RENDERERS);
+  var missing = ZONE_TYPES.filter(function (t) { return have.indexOf(t) < 0; });
+  var extra = have.filter(function (t) { return ZONE_TYPES.indexOf(t) < 0; });
+  if (missing.length || extra.length) log('ERROR zone types out of sync: missing ' + missing.join(',') + ' extra ' + extra.join(','));
+})();
 // Test hook (read-only view of state).
-window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render };
+window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render, zoneTypes: Object.keys(RENDERERS) };

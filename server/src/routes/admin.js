@@ -94,6 +94,15 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
       layout: state(req).resolveLayout(req.tenant, s),
       lineup: state(req).resolveLineup(req.tenant, s) });
   });
+  // Instant On is applied through a visible set_property command (queued, delivered, acked,
+  // errors logged) rather than silently by the renderer. desired = 1 for WARM, 0 for NORMAL.
+  const qGroupPower = db.prepare('SELECT power_mode FROM groups WHERE id = ? AND tenant_id = ?');
+  const qGroupSets = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND group_id = ?');
+  function queueInstantPower(tenant, set, powerMode) {
+    if (!powerMode) return null;
+    const desired = powerMode === 'WARM' ? 1 : 0;
+    return commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: desired }, { dedupe: true });
+  }
   r.patch('/sets/:id', (req, res) => {
     const s = loadSet(req, res); if (!s) return;
     const b = req.body || {};
@@ -121,6 +130,10 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     if ('room_number' in upd && upd.room_number !== s.room_number) {
       // Keep the TV's own property in step with admin (PLATFORM.md §4).
       commands.queue(req.tenant, s, 'set_property', { key: 'room_number', value: upd.room_number || '' }, { dedupe: true });
+    }
+    if ('group_id' in upd && upd.group_id !== s.group_id && upd.group_id) {
+      const g = qGroupPower.get(upd.group_id, req.tenant.id);
+      if (g) queueInstantPower(req.tenant, s, g.power_mode);
     }
     hub.refresh(req.tenant.id, { setIds: [s.id] });
     log(`admin ${req.user.username}: set ${s.id} (${s.serial}) updated ${JSON.stringify(upd)}`);
@@ -165,9 +178,14 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     try {
       db.prepare('UPDATE groups SET name = ?, description = ?, power_mode = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, powerMode, g.id);
     } catch (e) { return res.status(409).json({ error: 'a group with that name exists' }); }
+    let queued = 0;
+    if ('power_mode' in b && powerMode !== g.power_mode && powerMode) {
+      for (const s of qGroupSets.all(req.tenant.id, g.id)) { queueInstantPower(req.tenant, s, powerMode); queued++; }
+      log(`admin ${req.user.username}: group ${g.id} power_mode ${powerMode} → instant_power queued for ${queued} set(s)`);
+    }
     if ('layout_id' in b) assignLayout(req, g.id, b.layout_id, res, true);
     hub.refresh(req.tenant.id);
-    res.json(qGroupFull.get(g.id, req.tenant.id));
+    res.json({ ...qGroupFull.get(g.id, req.tenant.id), instant_power_queued: queued });
   });
   r.put('/groups/:id/layout', (req, res) => {
     const g = qGroupFull.get(Number(req.params.id), req.tenant.id);

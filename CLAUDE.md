@@ -259,3 +259,18 @@ Decisions already made (do not re-open):
 - `tv-app/test/fixtures/tiny.webm` is a VP8 clip generated with Chromium's MediaRecorder; the
   step 3c test plays it through the real `<video>` path and asserts the same element instance is
   still playing after PORTAL.
+
+## Phase 3 (spec: docs/PHASE3.md)
+
+### Part A — fixes from the 3c hardware test (2026-09-16)
+
+- `shared/zone-types.json` is the single list of layout zone types, read by the server
+  validator, both admin lists (`layoutSchema.js`, `editor/geometry.js`) and the renderer, which
+  self-checks its drawers against it and exposes `window.__cc.zoneTypes`. The admin's own
+  validator had a stale copy and was what rejected `banner` zones.
+- Instant On is applied through a visible `set_property {instant_power}` command queued by the
+  server on group save, set→group assignment and register (when the set disagrees); the renderer
+  writes, reads back, retries with the other value type, acks with `sent_as`/`value`, and a
+  refusal becomes a failed command + journal line. The renderer no longer applies it on its own.
+- HTML5 channels: `system/nosignalimage/set off` before playing and no `url('TV:')` hole on the
+  video host; tuner channels restore `default` and the hole.

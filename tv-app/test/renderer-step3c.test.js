@@ -111,15 +111,15 @@ test('banner placement zone positions the INFO banner; instant_power written fro
   assert.deepEqual([r.x, r.y, r.w], [300, 40, 900]);
   assert.equal(r.bg, 'rgb(18, 52, 86)'); assert.equal(r.fs, '40px');
   // instant_power: property written to 1 and read back; powermode/set never called
-  await s.page.waitForFunction(() => window.__fake.props.instant_power === '1', null, { timeout: 5000 });
+  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '1', null, { timeout: 8000 });
   const f = await s.fake();
   assert.equal(f.calls.filter((c) => c.uri === 'idcap://power/powermode/set').length, 0);
-  assert.ok(f.calls.some((c) => c.uri === 'idcap://configuration/property/set' && c.p.key === 'instant_power' && c.p.value === '1'));
+  assert.ok(f.calls.some((c) => c.uri === 'idcap://configuration/property/set' && c.p.key === 'instant_power' && String(c.p.value) === '1'));
   await sleep(300);
   const row = s.stack.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(s.set.id);
   assert.equal(row.instant_power, 1, 'heartbeat reported the new value');
   // group → NORMAL pushes 0
   await s.stack.api('PATCH', `/api/admin/groups/${s.g.id}`, { power_mode: 'NORMAL' }, s.cookie);
-  await s.page.waitForFunction(() => window.__fake.props.instant_power === '0', null, { timeout: 5000 });
+  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '0', null, { timeout: 8000 });
   await s.page.close();
 });

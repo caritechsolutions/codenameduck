@@ -86,9 +86,33 @@ export function getProperty(key) {
   var p = api === 'idcap' ? idcapCall('idcap://configuration/property/get', { key: key }) : hcapCall(hcap.property.getProperty, { key: key });
   return p.then(function (r) { return r && r.value !== undefined ? r.value : null; }, function () { return null; });
 }
+// value is passed as given (number stays a number) so callers can try the type LG expects.
 export function setProperty(key, value) {
-  return api === 'idcap' ? idcapCall('idcap://configuration/property/set', { key: key, value: String(value) })
-    : hcapCall(hcap.property.setProperty, { key: key, value: String(value) });
+  var v = typeof value === 'number' ? value : String(value);
+  return api === 'idcap' ? idcapCall('idcap://configuration/property/set', { key: key, value: v })
+    : hcapCall(hcap.property.setProperty, { key: key, value: v });
+}
+// Set a property and read it back; if the TV kept the old value, retry with the other type
+// (string ↔ number). Rejects with the read-back value when nothing sticks.
+export function setPropertyVerified(key, value) {
+  var wanted = String(value);
+  var attempt = function (v) {
+    return setProperty(key, v).then(function () { return getProperty(key); }).then(function (back) { return { ok: back != null && String(back) === wanted, back: back, sent: v }; });
+  };
+  return attempt(value).then(function (r) {
+    if (r.ok) return r;
+    var alt = typeof value === 'number' ? String(value) : (/^-?\d+$/.test(wanted) ? Number(value) : null);
+    if (alt === null) throw new Error('TV kept ' + key + '=' + r.back + ' after set ' + wanted);
+    return attempt(alt).then(function (r2) {
+      if (r2.ok) return r2;
+      throw new Error('TV kept ' + key + '=' + r2.back + ' after set ' + wanted + ' (tried ' + typeof value + ' and ' + typeof alt + ')');
+    });
+  });
+}
+// LG draws its own "No Signal" OSD when the tuner has no channel; switch it off while an HTML5
+// stream is the picture. modes: 'off' | 'default' (IDPN 100+).
+export function setNoSignalImage(mode) {
+  return api === 'idcap' ? idcapCall('idcap://system/nosignalimage/set', { mode: mode }) : hcapCall(hcap.system.setNoSignalImage, { mode: mode });
 }
 
 // ------------------------------------------------------------------ video / tuning

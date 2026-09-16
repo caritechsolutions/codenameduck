@@ -17,7 +17,7 @@ export default function Groups() {
     } catch (e) { toast(e.message, 'bad'); }
   }
   async function powerMode(g, mode) {
-    try { await patch(`/groups/${g.id}`, { power_mode: mode || null }); toast(mode ? `instant_power=${mode === 'WARM' ? 1 : 0} pushed to online sets in ${g.name}` : 'Power mode left to the sets'); groups.reload(); }
+    try { await patch(`/groups/${g.id}`, { power_mode: mode || null }); toast(mode ? `set_property instant_power=${mode === 'WARM' ? 1 : 0} queued for the sets in ${g.name} — watch each set's commands list` : 'Power mode left to the sets'); groups.reload(); }
     catch (e) { toast(e.message, 'bad'); }
   }
   async function save(form) {

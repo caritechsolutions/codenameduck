@@ -34,6 +34,10 @@ function createCommands(db, hub, log = () => {}) {
 
   function ack(setId, commandId, ok, result) {
     const info = markDone.run(ok ? 'acked' : 'failed', JSON.stringify(result === undefined ? null : result), commandId, setId);
+    if (info.changes > 0 && !ok) {
+      const c = get.get(commandId);
+      log(`command #${commandId} ${c ? c.type : '?'} FAILED on set ${setId}: ${result && result.error ? result.error : JSON.stringify(result)}`);
+    }
     return info.changes > 0;
   }
 

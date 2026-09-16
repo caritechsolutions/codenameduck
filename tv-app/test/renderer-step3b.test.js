@@ -75,7 +75,7 @@ test('1280x720 set: video coords scale to display_resolution; banner, digits and
 test('errors and ws lifecycle reach the server log; WARM group writes instant_power, never powermode/set', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
   const s = await setup(t, { viewport: { width: 1920, height: 1080 }, osd: '1920x1080', powerMode: 'WARM' });
-  await s.page.waitForFunction(() => window.__fake.props.instant_power === '1', null, { timeout: 5000 });
+  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '1', null, { timeout: 8000 });
   assert.equal((await s.fake()).powerMode, 'NORMAL', 'powermode/set is never called by the renderer');
   assert.equal((await s.fake()).calls.filter((c) => c.uri === 'idcap://power/powermode/set').length, 0);
   // a failing channel change is reported with kind tune

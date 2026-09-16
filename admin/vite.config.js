@@ -9,6 +9,7 @@ export default defineConfig({
   build: { outDir: 'dist', emptyOutDir: true, sourcemap: false },
   server: {
     port: 5173,
+    fs: { allow: ['..'] },   // shared/zone-types.json lives one level up
     proxy: {
       '/api': { target: process.env.VITE_DEV_TARGET || 'http://127.0.0.1:3000', changeOrigin: false,
         headers: { host: process.env.VITE_DEV_HOST || 'hoteldemo.caritech.net' } },

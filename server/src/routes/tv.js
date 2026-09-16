@@ -73,6 +73,14 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
     if (set.room_number && reported !== set.room_number && commands) {
       commands.queue(tenant, set, 'set_property', { key: 'room_number', value: set.room_number }, { dedupe: true });
     }
+    // Same for Instant On: the group decides instant_power; a disagreeing set gets a visible command.
+    if (set.group_id && commands) {
+      const g = db.prepare('SELECT power_mode FROM groups WHERE id = ?').get(set.group_id);
+      if (g && g.power_mode) {
+        const desired = g.power_mode === 'WARM' ? 1 : 0;
+        if (instantPower !== desired) commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: desired }, { dedupe: true });
+      }
+    }
 
     log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}`);
     res.json({ ...state.build(tenant, set), token: set.token, created });

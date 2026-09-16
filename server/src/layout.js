@@ -64,7 +64,7 @@ function makeLayoutResolver(db) {
 }
 
 
-const ZONE_TYPES = ['video', 'text', 'image', 'channel_list', 'clock', 'menu', 'html', 'weather', 'app_launcher', 'banner', 'digits', 'popup'];
+const ZONE_TYPES = require('../../shared/zone-types.json');   // single source of truth (see shared/README.md)
 
 // Validate + normalise a layout document (schema 1). Returns { doc, errors }.
 function validateLayout(input) {

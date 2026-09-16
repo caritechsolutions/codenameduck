@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -18,7 +18,14 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
     setTimeout(function () {
       switch (uri) {
         case 'idcap://configuration/property/get': (p.key in f.props) ? ok({ value: f.props[p.key] }) : fail('no such key'); break;
-        case 'idcap://configuration/property/set': f.props[p.key] = p.value; ok(); break;
+        case 'idcap://configuration/property/set': {
+          var rules = f.propertyRules || {};
+          if ((rules.readonly || []).indexOf(p.key) >= 0) { fail('property is read only'); break; }
+          if ((rules.numericOnly || []).indexOf(p.key) >= 0 && typeof p.value !== 'number') { ok(); break; }   // TV "accepts" but keeps the old value
+          f.props[p.key] = p.value; ok(); break;
+        }
+        case 'idcap://system/nosignalimage/set': f.noSignal = p.mode; ok(); break;
+        case 'idcap://system/nosignalimage/get': ok({ mode: f.noSignal || 'default' }); break;
         case 'idcap://tv/channel/change/request': f.channel = p; f.media = null; ok(); setTimeout(function () { window.__fakeEvent('idcap::channel_changed', { result: true }); }, 30); break;
         case 'idcap://tv/channel/get': ok(Object.assign({ channelStatus: 'ok' }, f.channel || {})); break;
         case 'idcap://tv/channel/stop': case 'idcap://tv/channel/replay': ok(); break;

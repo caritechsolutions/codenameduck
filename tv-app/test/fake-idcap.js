@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}, serviceCountry: ${JSON.stringify(overrides.__serviceCountry === undefined ? 'NL' : overrides.__serviceCountry)}, hideUntilRegistered: ${JSON.stringify(overrides.__hideUntilRegistered || [])}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -25,6 +25,8 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
           if ((rules.sticky || []).indexOf(p.key) >= 0) { ok(); break; }   // TV accepts the call but keeps the old value
           f.props[p.key] = p.value; ok(); break;
         }
+        case 'idcap://configuration/servicecountry/get': ok({ country: f.serviceCountry }); break;
+        case 'idcap://configuration/servicecountry/set': f.serviceCountry = p.country; ok(); break;
         case 'idcap://externalinput/get': ok({ type: f.input.type, index: f.input.index }); break;
         case 'idcap://externalinput/set': f.input = { type: p.type, index: p.index }; f.inputSets = (f.inputSets || 0) + 1; ok(); break;
         case 'idcap://system/nosignalimage/set': f.noSignal = p.mode; ok(); break;
@@ -53,14 +55,15 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
           if (p.tokenList) p.tokenList.forEach(function (t) { f.appAuth = f.appAuth || {}; f.appAuth[t.id] = 'registered'; });
           if (p.accountNumber) { f.appAuth = {}; }
           ok();
-          setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', { result: true, id: p.tokenList ? p.tokenList.map(function (t) { return t.id; }).join(',') : 'account' }); }, 30);
+          // LG's documented event shape (docs/lg/netflix.md): { id, tokenResult, errorMessage }
+          setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', { id: p.tokenList ? p.tokenList.map(function (t) { return t.id; }).join(',') : 'account', tokenResult: true }); }, 30);
           break;
         }
-        case 'idcap://application/list': ok({ list: f.appList || [
+        case 'idcap://application/list': ok({ list: (f.appList || [
           { id: 'netflix', title: 'Netflix', icon: '/usr/palm/applications/netflix/icon.png', type: 'native' },
           { id: 'youtube.leanback.v4', title: 'YouTube', icon: '/usr/palm/applications/youtube/icon.png', type: 'web' },
           { id: 'amazon', title: 'Prime Video', type: 'native' },
-          { id: 'com.webos.app.browser', title: 'Web Browser', type: 'web' }] }); break;
+          { id: 'com.webos.app.browser', title: 'Web Browser', type: 'web' }]).filter(function (a) { return f.hideUntilRegistered.indexOf(a.id) < 0 || (f.appAuth || {})[a.id] === 'registered'; }) }); break;
         case 'idcap://procentric/application/launch': f.launched.push({ reload: true }); ok(); break;
         case 'idcap://tv/checkout/request': f.checkedOut = true; ok(); break;
         case 'idcap://network/configuration/get': ok({ wired: { state: 'connected', ipAddress: '10.0.0.5' }, isInternetConnectionAvailable: true }); break;

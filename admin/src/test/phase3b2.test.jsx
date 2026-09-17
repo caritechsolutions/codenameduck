@@ -86,10 +86,10 @@ describe('B2 canvas editor', () => {
     d = jsonDoc();
     expect(d.zones.map((z) => z.id)).toContain('text');
     expect(d.zones.find((z) => z.id === 'text')).toMatchObject({ x: 1136, y: 76, text: 'Hi {{room}}, {{guest_first}}' });
-    // pages: the migrated "info" page (was a hidden zone) is in the navigator; selecting it dims home-only zones
+    // pages: the migrated "info" page (was a hidden zone) is in the navigator; selecting it hides home-only zones (B3c)
     expect(jsonDoc().pages.map((p) => p.id)).toEqual(['home', 'info']);
     fireEvent.click(screen.getByLabelText('page Info'));
-    expect(document.querySelector('[data-zone="welcome"]').className).toMatch(/dim/);
+    expect(document.querySelector('[data-zone="welcome"]')).toBeNull();
     expect(document.querySelector('[data-zone="tv"]').className).toMatch(/inherited/);   // global zone from home
     fireEvent.click(screen.getByLabelText('Add page'));
     fireEvent.change(screen.getByLabelText('New page name'), { target: { value: 'Dining' } });

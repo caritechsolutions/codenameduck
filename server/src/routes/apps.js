@@ -20,15 +20,13 @@ function createAppsRouter({ db, hub, apps, commands, log = () => {} }) {
   r.get('/apps/activation', (req, res) => res.json({ config: apps.activationConfig(req.tenant), results: apps.activationResults(req.tenant) }));
   r.put('/apps/activation', (req, res) => {
     const b = req.body || {};
-    if (b.tokens !== undefined && !Array.isArray(b.tokens)) return res.status(400).json({ error: 'tokens must be an array of {id, token}' });
-    const cfg = apps.setActivationConfig(req.tenant, { tokens: b.tokens || [], accountNumber: b.accountNumber || '' });
-    log(`admin ${req.user.username}: app activation config for ${req.tenant.name}: ${cfg.tokens.length} token(s)${cfg.accountNumber ? ', account number set' : ''}`);
+    const cfg = apps.setActivationConfig(req.tenant, { accountNumber: b.accountNumber || '' });
+    log(`admin ${req.user.username}: app activation config for ${req.tenant.name}: account number ${cfg.accountNumber ? 'set' : 'cleared'}`);
     res.json({ config: cfg });
   });
   r.post('/apps/activation/run', (req, res) => {
-    const cfg = apps.activationConfig(req.tenant);
-    const payload = apps.registerPayload(cfg);
-    if (!payload) return res.status(400).json({ error: 'add at least one app token or an account number first' });
+    const payload = apps.registerPayload(req.tenant);
+    if (!payload) return res.status(400).json({ error: 'no licence tokens on file (superadmin → App licences) and no account number' });
     const b = req.body || {};
     let sets;
     if (b.group_id) { const g = qGroup.get(Number(b.group_id), req.tenant.id); if (!g) return res.status(404).json({ error: 'group not found' }); sets = qGroupSets.all(req.tenant.id, g.id); }

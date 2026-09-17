@@ -233,13 +233,40 @@ export function duplicateZone(doc, idOrIds, pageId) {
   }
   return { doc: out, zone: zones[0], zones };
 }
-export function moveZoneOrder(doc, id, dir) { // dir: -1 back, +1 front, 'front', 'back'
-  const i = doc.zones.findIndex((z) => z.id === id);
-  if (i < 0) return doc;
-  const j = dir === 'front' ? doc.zones.length - 1 : dir === 'back' ? 0 : i + dir;
-  if (j < 0 || j >= doc.zones.length || j === i) return doc;
-  const zones = doc.zones.slice(); const [z] = zones.splice(i, 1); zones.splice(j, 0, z);
+// Z-order. With a pageId the move is relative to that page's editable zones only (their slots in
+// doc.zones are re-filled in the new order; zones of other pages keep their positions).
+export function moveZoneOrder(doc, id, dir, pageId) { // dir: -1 back, +1 front, 'front', 'back'
+  const peers = pageId ? editableZoneIds(doc, pageId) : doc.zones.map((z) => z.id);
+  const k = peers.indexOf(id);
+  if (k < 0) return doc;
+  const j = dir === 'front' ? peers.length - 1 : dir === 'back' ? 0 : k + dir;
+  if (j < 0 || j >= peers.length || j === k) return doc;
+  const order = peers.slice(); order.splice(k, 1); order.splice(j, 0, id);
+  const byId = Object.fromEntries(doc.zones.map((z) => [z.id, z]));
+  let n = 0;
+  const zones = doc.zones.map((z) => (peers.includes(z.id) ? byId[order[n++]] : z));
   return { ...doc, zones };
+}
+export function zoneOrderIndex(doc, id, pageId) {   // position among the page's editable zones (or all)
+  const peers = pageId ? editableZoneIds(doc, pageId) : doc.zones.map((z) => z.id);
+  return { index: peers.indexOf(id), count: peers.length };
+}
+// Page isolation (B3c): only the zones a page lists are editable there, plus the OSD placement
+// zones (global, edited on the home page). Inherited globals on another page are ghosts —
+// drawn dimmed, never selectable. Everything else is not drawn on that page at all.
+export function editableZoneIds(doc, pageId) {
+  const p = pageById(doc, pageId);
+  const ids = new Set((p && p.zones) || []);
+  if (!pageId || !p || pageId === homePageId(doc)) for (const z of doc.zones) if (PLACEMENT_TYPES.includes(z.type)) ids.add(z.id);
+  return doc.zones.filter((z) => ids.has(z.id)).map((z) => z.id);   // stacking order
+}
+export function ghostZoneIds(doc, pageId) {
+  const editable = new Set(editableZoneIds(doc, pageId));
+  const p = pageById(doc, pageId);
+  if (!p) return [];
+  const shown = new Set(pageZoneIds(doc, pageId));
+  const inheritOn = p.inherit !== false;
+  return doc.zones.filter((z) => !editable.has(z.id) && (shown.has(z.id) || (inheritOn && PLACEMENT_TYPES.includes(z.type)))).map((z) => z.id);
 }
 
 // ---- pages

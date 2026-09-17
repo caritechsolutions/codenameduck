@@ -9,7 +9,7 @@ import Palette from '../editor/Palette.jsx';
 import EditorToolbar from '../editor/EditorToolbar.jsx';
 import LayoutPreview from '../editor/LayoutPreview.jsx';
 import PageNavigator from '../editor/PageNavigator.jsx';
-import { addZone, ensurePages, duplicateZone, removeZone, errorsByZone, pagesOf, homePageId, pageById } from '../editor/geometry.js';
+import { addZone, ensurePages, duplicateZone, removeZone, errorsByZone, pagesOf, homePageId, pageById, editableZoneIds } from '../editor/geometry.js';
 import { SessionCtx } from '../App.jsx';
 
 const HISTORY = 50;
@@ -105,6 +105,12 @@ export default function LayoutEdit() {
     try { await put(`/groups/${groupId}/layout`, { layout_id: on ? Number(id) : null }); groups.reload(); toast(on ? 'Assigned' : 'Unassigned'); }
     catch (e) { toast(e.message, 'bad'); }
   }
+  // Page isolation: the selection can only hold zones editable on the current page.
+  useEffect(() => {
+    if (!doc || !selectedIds.length) return;
+    const ok = new Set(editableZoneIds(doc, pageId));
+    if (selectedIds.some((sid) => !ok.has(sid))) setSelectedIds(selectedIds.filter((sid) => ok.has(sid)));
+  }, [doc, pageId, selectedIds]);
   const add = (type, at) => { const r = addZone(doc, type, pageId, at); change(r.doc); setSelectedIds([r.zone.id]); setTab('canvas'); };
   const selectPage = (pid) => { setPageId(pid); setSelectedIds([]); };
 

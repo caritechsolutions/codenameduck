@@ -19,6 +19,8 @@ const { createMediaStore } = require('./media');
 const { createMediaRouter } = require('./routes/media');
 const { createAppStore } = require('./apps');
 const { createAppsRouter } = require('./routes/apps');
+const { createLicenceStore } = require('./licences');
+const { createLicencesRouter } = require('./routes/licences');
 const { createWeather } = require('./weather');
 
 function timestamp() { return new Date().toISOString(); }
@@ -37,7 +39,8 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   syncTenantsFromDisk(db, tenantsDir, logger);
   migrateStoredLayouts(db, logger);
   const tenants = createTenantResolver(db, tenantsDir, logger);
-  const apps = createAppStore(db, { log: logger });
+  const licences = createLicenceStore(db, { dataDir, log: logger });
+  const apps = createAppStore(db, { log: logger, licences });
   const state = createStateBuilder(db, { pollIntervalS, apps });
   const auth = createAuth(db);
   const hub = createHub({ db, tenants, state, apps, log: logger });
@@ -72,6 +75,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   admin.use(createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, auth, tenantCommand, log: logger }));
   admin.use(createMediaRouter({ db, hub, media, log: logger }));
   admin.use(createAppsRouter({ db, hub, apps, commands, log: logger }));
+  admin.use(createLicencesRouter({ auth, licences, hub, db, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
@@ -101,7 +105,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
   expireTimer.unref();
 
-  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, weather, seeded, log: logger };
+  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, licences, weather, seeded, log: logger };
 }
 
 function escapeHtml(s) {

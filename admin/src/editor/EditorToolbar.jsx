@@ -1,5 +1,5 @@
 import React from 'react';
-import { PLACEMENT_TYPES, alignZones, distributeZones, moveZoneOrder, updateZones, duplicateZone, removeZone, toggleZoneInPage, isOnPage } from './geometry.js';
+import { PLACEMENT_TYPES, alignZones, distributeZones, moveZoneOrder, zoneOrderIndex, updateZones, duplicateZone, removeZone, toggleZoneInPage, isOnPage } from './geometry.js';
 
 // Toolbar above the canvas: undo/redo, alignment, distribute, z-order, lock, show/hide on this
 // screen, duplicate, delete. Everything acts on the current selection.
@@ -11,8 +11,9 @@ export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, pa
   const allPlacement = n > 0 && sel.every((z) => PLACEMENT_TYPES.includes(z.type));
   const B = ({ label, title, on, disabled, active }) => <button className={'sm tb' + (active ? ' active' : '')} title={title} aria-label={title} onClick={on} disabled={disabled}>{label}</button>;
   const align = (how) => onChange(alignZones(doc, selectedIds, how));
-  const order = (dir) => { if (one) onChange(moveZoneOrder(doc, one.id, dir)); };
-  const idx = one ? doc.zones.findIndex((z) => z.id === one.id) : -1;
+  const order = (dir) => { if (one) onChange(moveZoneOrder(doc, one.id, dir, pageId)); };   // z-order within this page only
+  const oi = one ? zoneOrderIndex(doc, one.id, pageId) : { index: -1, count: 0 };
+  const idx = oi.index, last = oi.count - 1;
   const shown = one ? isOnPage(doc, pageId, one.id) : false;
   return (
     <div className="etoolbar" role="toolbar" aria-label="Editor toolbar">
@@ -33,8 +34,8 @@ export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, pa
         <B label="⫼" title="Distribute vertically (3+)" on={() => onChange(distributeZones(doc, selectedIds, 'y'))} disabled={n < 3} />
       </div>
       <div className="tb-group">
-        <B label="⇈" title="Bring to front" on={() => order('front')} disabled={!one || idx === doc.zones.length - 1} />
-        <B label="↥" title="Bring forward" on={() => order(1)} disabled={!one || idx === doc.zones.length - 1} />
+        <B label="⇈" title="Bring to front" on={() => order('front')} disabled={!one || idx === last} />
+        <B label="↥" title="Bring forward" on={() => order(1)} disabled={!one || idx === last} />
         <B label="↧" title="Send backward" on={() => order(-1)} disabled={!one || idx === 0} />
         <B label="⇊" title="Send to back" on={() => order('back')} disabled={!one || idx === 0} />
       </div>

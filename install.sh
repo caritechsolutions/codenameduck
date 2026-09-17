@@ -126,6 +126,12 @@ main() {
 
   # --- data dir + sudo rule + systemd service --------------------------------------------------
   install -d -m 0750 -o www-data -g www-data "$ROOT_DIR/data"
+  # Encryption key for LG app licence tokens (server/src/licences.js). Created once, never rotated here.
+  if [ ! -s "$ROOT_DIR/data/secret.key" ]; then
+    (umask 077; od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$ROOT_DIR/data/secret.key"; echo >> "$ROOT_DIR/data/secret.key")
+    chown www-data:www-data "$ROOT_DIR/data/secret.key"; chmod 0600 "$ROOT_DIR/data/secret.key"
+    log "created $ROOT_DIR/data/secret.key (licence token encryption key, mode 600)"
+  fi
   # The admin's superadmin "Tenants" page creates tenants by running the same CLI as root.
   local sudoers=/etc/sudoers.d/coopcentric tmp_sudo
   tmp_sudo="$(mktemp)"

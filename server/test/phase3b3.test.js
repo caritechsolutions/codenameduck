@@ -23,6 +23,7 @@ test('normalizeAppList accepts the shapes LG might send', () => {
 test('apps: discovered at register, enabled per group, pushed to sets, overrides, forget', async (t) => {
   const s = await startServer(); t.after(s.close);
   const { cookie } = await s.login();
+  await s.call('PATCH', '/api/admin/tenant', { cookie, body: { settings: { netflix_hotel_id: 'HOTEL-1' } } });   // Netflix is only enabled with a hotel id (B3c)
   // two sets on two models report their lists; the second set knows one app more
   const a = await s.registerSet('A', { apps: LG_LIST });
   assert.equal(a.status, 200);

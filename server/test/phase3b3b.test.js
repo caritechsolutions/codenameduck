@@ -22,6 +22,7 @@ test('normalizeAuth reads the usual register/status shapes', () => {
 test('activation: status per set hides un-activated apps from that set only; admin sees badges; tokens register on the sets', async (t) => {
   const s = await startServer(); t.after(s.close);
   const { cookie } = await s.login();
+  await s.call('PATCH', '/api/admin/tenant', { cookie, body: { settings: { netflix_hotel_id: 'HOTEL-1' } } });
   // A reports Netflix unregistered, B reports everything registered, C (HCAP-like) reports no status
   const a = await s.registerSet('A', { apps: LIST, apps_status: { netflix: { id: 'netflix', status: 'unregistered' }, 'youtube.leanback.v4': { status: 'registered' }, amazon: { status: 'registered' } } });
   const b = await s.registerSet('B', { apps: LIST, apps_status: { netflix: { status: 'registered' }, 'youtube.leanback.v4': { status: 'registered' }, amazon: { status: 'registered' } } });
@@ -42,18 +43,19 @@ test('activation: status per set hides un-activated apps from that set only; adm
   const pollC = await s.call('GET', `/api/tv/poll?set_id=${c.json.set_id}&token=${c.json.token}`);
   assert.equal(pollC.json.apps.length, 3, 'C: unknown status counts as activated');
 
-  // activation config: validation, save, run → register_apps queued (dedupe), new sets get it at register
+  // activation: tokens come from the superadmin licence store (B3c); tenants only add an account number
   assert.equal((await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: {} })).status, 400, 'nothing configured yet');
-  assert.equal((await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { tokens: 'x' } })).status, 400);
-  const saved = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { tokens: [{ id: 'netflix', token: ' NFX-123 ' }, { id: '', token: 'junk' }], accountNumber: '' } });
-  assert.equal(saved.status, 200); assert.deepEqual(saved.json.config, { tokens: [{ id: 'netflix', token: 'NFX-123' }], accountNumber: '' });
+  const lic = await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu\n' }] } });
+  assert.equal(lic.status, 200, lic.text); assert.equal(lic.json.added[0].app_id, 'netflix');
+  const saved = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: '' } });
+  assert.equal(saved.status, 200); assert.deepEqual(saved.json.config, { accountNumber: '', licensed: ['netflix'] });
   const cfg = (await s.call('GET', '/api/admin/apps/activation', { cookie })).json;
-  assert.deepEqual(cfg.config.tokens, [{ id: 'netflix', token: 'NFX-123' }]); assert.deepEqual(cfg.results, []);
+  assert.deepEqual(cfg.config.licensed, ['netflix']); assert.deepEqual(cfg.results, []);
   const run = await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: { group_id: g.id } });
   assert.equal(run.status, 200); assert.equal(run.json.queued, 3);
   const cmdsA = (await s.call('GET', `/api/admin/sets/${a.json.set_id}`, { cookie })).json.commands;
   const reg = cmdsA.find((x) => x.type === 'register_apps');
-  assert.ok(reg, 'register_apps queued'); assert.deepEqual(reg.payload, { tokenList: [{ id: 'netflix', token: 'NFX-123' }] });
+  assert.ok(reg, 'register_apps queued'); assert.deepEqual(reg.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }] });
   assert.equal((await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: {} })).json.queued, 3);
   assert.equal((await s.call('GET', `/api/admin/sets/${a.json.set_id}`, { cookie })).json.commands.filter((x) => x.type === 'register_apps' && x.status === 'queued').length, 1, 'deduped while queued');
   // a brand-new set gets the registration at its first register
@@ -77,12 +79,16 @@ test('activation: status per set hides un-activated apps from that set only; adm
   // A registering again does not get another register_apps (it succeeded)
   const a2 = await s.registerSet('A', { apps: LIST });
   assert.ok(!a2.json.commands.some((x) => x.type === 'register_apps' && x.id !== reg.id), 'no new registration for a set that succeeded');
-  // an account number instead of tokens
-  const acc = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { tokens: [], accountNumber: 'ACC-9' } });
+  // an account number on top of the tokens; without any licence the payload is the account number alone
+  const acc = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: 'ACC-9' } });
   assert.equal(acc.json.config.accountNumber, 'ACC-9');
   const run2 = await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: { set_ids: [b.json.set_id] } });
   assert.equal(run2.json.queued, 1);
   const cmdB = (await s.call('GET', `/api/admin/sets/${b.json.set_id}`, { cookie })).json.commands.find((x) => x.type === 'register_apps');
-  assert.deepEqual(cmdB.payload, { accountNumber: 'ACC-9' });
+  assert.deepEqual(cmdB.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }], accountNumber: 'ACC-9' });
+  await s.call('DELETE', `/api/admin/licences/${lic.json.added[0].id}`, { cookie });
+  const run3 = await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: { set_ids: [c.json.set_id] } });
+  assert.equal(run3.json.queued, 1);
+  assert.deepEqual((await s.call('GET', `/api/admin/sets/${c.json.set_id}`, { cookie })).json.commands.find((x) => x.type === 'register_apps').payload, { accountNumber: 'ACC-9' });
   ws.close();
 });

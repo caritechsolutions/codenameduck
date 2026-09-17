@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { get, put, patch, del, post } from '../api.js';
+import { Link } from 'react-router-dom';
+import { SessionCtx } from '../App.jsx';
 import { useAsync, useToast, Empty, Field, Modal } from '../components/ui.jsx';
 import MediaPicker from '../components/MediaPicker.jsx';
 import { timeAgo } from '../util.js';
@@ -8,7 +10,8 @@ import { timeAgo } from '../util.js';
 // Enable per group with a checkbox matrix; override the display name and the icon (Media library).
 // Activation (B3b): each set also reports application/register/status per app; un-activated apps
 // are greyed here (never on the guest screen) and hidden from the apps zone on that set. The
-// Activation panel stores the tenant's app tokens / account number and registers them on the sets.
+// Activation panel (B3c): tokens come from the superadmin's licence store (App licences); the
+// tenant only adds an optional LG account number. Netflix also needs a hotel id (Settings).
 export default function Apps() {
   const toast = useToast();
   const apps = useAsync(() => get('/apps'), []);
@@ -45,7 +48,7 @@ export default function Apps() {
                 <td style={{ width: 44 }}><div className="app-ico">{a.icon ? <img src={a.icon} alt="" /> : <span>{(a.name || '?').charAt(0).toUpperCase()}</span>}</div></td>
                 <td><b>{a.name}</b>{a.name_override && a.title && <div className="muted small">LG title: {a.title}</div>}</td>
                 <td><code className="small">{a.app_id}</code>{a.type && <span className="pill" style={{ marginLeft: 6 }}>{a.type}</span>}</td>
-                <td><ActivationBadge app={a} /></td>
+                <td><ActivationBadge app={a} />{a.requires === 'netflix_hotel_id' && <div><Link to="/settings" className="pill warn" title="Netflix is hidden from the sets until the tenant has a Netflix hotel id">needs hotel id → Settings</Link></div>}{a.licensed && <div className="muted small">licence on file</div>}</td>
                 <td className="muted small">{a.models.length ? a.models.join(', ') : '—'}<div>{a.set_count} set(s) · {timeAgo(a.last_seen)}</div></td>
                 {gl.map((g) => <td key={g.id} className="num"><input type="checkbox" aria-label={`${a.name} in ${g.name}`} checked={a.group_ids.includes(g.id)} disabled={saving === g.id} onChange={() => toggle(a, g)} /></td>)}
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -57,7 +60,7 @@ export default function Apps() {
           </table>)}
       </div>
       {gl.length === 0 && list.length > 0 && <p className="muted small" style={{ marginTop: 8 }}>Create a group first to enable apps for its sets.</p>}
-      <ActivationPanel apps={list} groups={gl} onChanged={() => apps.reload()} />
+      <ActivationPanel groups={gl} onChanged={() => apps.reload()} />
       {edit && <EditApp app={edit} onClose={() => setEdit(null)} onSaved={(a) => { apps.setData(list.map((x) => (x.id === a.id ? { ...x, ...a } : x))); setEdit(null); }} />}
       {raw && <Modal title={`Raw entry for ${raw.app_id}`} onClose={() => setRaw(null)} footer={<button onClick={() => setRaw(null)}>Close</button>}>
         <p className="muted small">The first entry LG returned for this app in <code>idcap://application/list</code>, as received, and the latest <code>register/status</code> value. Tell Richard the shape if the name/icon/activation columns look wrong.</p>
@@ -76,19 +79,20 @@ function ActivationBadge({ app }) {
   return <span className="pill" title={title}>unknown</span>;
 }
 
-// Tenant tokens / account number → register_apps on the sets; per-set results below.
-function ActivationPanel({ apps, groups, onChanged }) {
+// Licences on file (superadmin store) + tenant account number → register_apps on the sets;
+// per-set results below.
+function ActivationPanel({ groups, onChanged }) {
   const toast = useToast();
+  const session = useContext(SessionCtx);
   const data = useAsync(() => get('/apps/activation'), []);
-  const [tokens, setTokens] = useState([]);
   const [account, setAccount] = useState('');
   const [group, setGroup] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (data.data) { setTokens(data.data.config.tokens || []); setAccount(data.data.config.accountNumber || ''); } }, [data.data]);
-  const setTok = (i, patch) => setTokens(tokens.map((t, j) => (j === i ? { ...t, ...patch } : t)));
+  useEffect(() => { if (data.data) setAccount(data.data.config.accountNumber || ''); }, [data.data]);
+  const licensed = (data.data && data.data.config.licensed) || [];
   async function save() {
     setBusy(true);
-    try { const r = await put('/apps/activation', { tokens, accountNumber: account }); setTokens(r.config.tokens); setAccount(r.config.accountNumber); toast('Activation settings saved'); return r.config; }
+    try { const r = await put('/apps/activation', { accountNumber: account }); setAccount(r.config.accountNumber); data.setData({ ...data.data, config: r.config }); toast('Activation settings saved'); return r.config; }
     catch (e) { toast(e.message, 'bad'); return null; } finally { setBusy(false); }
   }
   async function run() {
@@ -99,33 +103,24 @@ function ActivationPanel({ apps, groups, onChanged }) {
     catch (e) { toast(e.message, 'bad'); } finally { setBusy(false); }
   }
   const results = (data.data && data.data.results) || [];
+  const isSuper = session && session.user && session.user.role === 'superadmin';
   return (
     <div className="card" style={{ marginTop: 12 }}>
       <h2>Activation</h2>
-      <p className="muted small">Some LG apps (Netflix, …) need a token from the contract before they launch ("authorize error"). Enter the tokens LG gave you per app id, or the account number, then register them on the sets: the renderer calls <code>application/register</code> and waits for <code>application_registration_result_received</code>. New sets get the registration automatically at their first register. Results and the per-app <code>register/status</code> are shown per set.</p>
+      <p className="muted small">Some LG apps (Netflix, Prime Video, …) need a licence token from the SI contract before they launch ("authorize error"). Tokens are uploaded once by the superadmin ({isSuper ? <Link to="/licences">App licences</Link> : 'App licences'}) and shared by all hotels; every set registers them at boot when LG reports the app as not authorised. The button below pushes the same registration to the sets immediately (the renderer calls <code>application/register</code> and waits for <code>application_registration_result_received</code>). Netflix also needs the <Link to="/settings">Netflix hotel id</Link>.</p>
       <div className="grid2">
         <div>
-          <Field label="App tokens" hint="One row per app id as LG issued them.">
-            {tokens.map((t, i) => (
-              <div key={i} className="list-row">
-                <select value={t.id || ''} onChange={(e) => setTok(i, { id: e.target.value })} aria-label="Token app">
-                  <option value="">— app —</option>
-                  {apps.map((a) => <option key={a.id} value={a.app_id}>{a.name} ({a.app_id})</option>)}
-                  {t.id && !apps.some((a) => a.app_id === t.id) && <option value={t.id}>{t.id}</option>}
-                </select>
-                <input value={t.token || ''} onChange={(e) => setTok(i, { token: e.target.value })} placeholder="token" aria-label="Token" />
-                <button className="sm ghost danger" onClick={() => setTokens(tokens.filter((_, j) => j !== i))} aria-label="remove token">✕</button>
-              </div>))}
-            <button className="sm" onClick={() => setTokens([...tokens, { id: '', token: '' }])}>Add token</button>
+          <Field label="Licences on file" hint="Uploaded by the superadmin; one token per app id.">
+            <div data-testid="licensed-apps">{licensed.length ? licensed.map((id) => <span key={id} className="pill ok" style={{ marginRight: 6 }}>{id}</span>) : <span className="muted">none yet</span>}</div>
           </Field>
+          <Field label="LG account number (optional, in addition to the licences)"><input value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Account number" placeholder="as given by LG" /></Field>
         </div>
         <div>
-          <Field label="Account number (alternative to tokens)"><input value={account} onChange={(e) => setAccount(e.target.value)} aria-label="Account number" placeholder="as given by LG" /></Field>
           <Field label="Register on">
             <div className="inline">
               <select value={group} onChange={(e) => setGroup(e.target.value)} aria-label="Register group"><option value="">all sets</option>{groups.map((g) => <option key={g.id} value={g.id}>group {g.name} ({g.set_count})</option>)}</select>
               <button onClick={save} disabled={busy}>Save</button>
-              <button className="primary" onClick={run} disabled={busy || (!account && !tokens.some((t) => t.id && t.token))}>Register now</button>
+              <button className="primary" onClick={run} disabled={busy || (!account && !licensed.length)}>Register now</button>
             </div>
           </Field>
         </div>

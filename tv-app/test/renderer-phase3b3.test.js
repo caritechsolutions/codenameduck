@@ -28,7 +28,7 @@ async function setup(t) {
   const g = (await stack.api('POST', '/api/admin/groups', { name: 'G' }, cookie)).json;
   await stack.api('PUT', `/api/admin/groups/${g.id}/layout`, { layout_id: l.id }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/lineup`, { lineup_id: lu.id }, cookie);
-  await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, default_lineup_id: lu.id }, cookie);
+  await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, default_lineup_id: lu.id, settings: { netflix_hotel_id: 'HOTEL-1' } }, cookie);   // B3c: Netflix needs a hotel id
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await page.addInitScript(fakeIdcap('305MAXX1Z123', { __appAuth: {} }));   // everything activated (B3b hides un-activated apps)
   // let the test flip document.hidden
@@ -82,7 +82,7 @@ test('apps: reported at register, tiles follow the group, OK launches with noSpl
   await s.key(KEY.ENTER);
   await sleep(100);
   f = await s.fake();
-  assert.equal(f.launched[f.launched.length - 1].id, 'netflix'); assert.equal(f.launched[f.launched.length - 1].noSplash, true);
+  assert.equal(f.launched[f.launched.length - 1].id, 'netflix'); assert.equal(f.launched[f.launched.length - 1].noSplash, false);   // B3c: Netflix launches with LG's params, splash on
 
   // background: the HTML5 clip pauses while hidden, resumes when visible, keys are re-claimed
   await s.page.waitForFunction(() => { const v = document.getElementById('urlvideo'); return v && !v.paused && v.currentTime > 0; }, null, { timeout: 15000 });

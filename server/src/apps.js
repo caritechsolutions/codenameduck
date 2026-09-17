@@ -45,7 +45,7 @@ function normalizeAuth(raw) {
   return { activated: null, status: null };
 }
 
-function createAppStore(db, { log = () => {} } = {}) {
+function createAppStore(db, { log = () => {}, licences = null } = {}) {
   const findByAppId = db.prepare('SELECT * FROM apps WHERE tenant_id = ? AND app_id = ?');
   const insert = db.prepare(`INSERT INTO apps (tenant_id, app_id, title, icon_url, type, models_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)`);
   const update = db.prepare(`UPDATE apps SET title = COALESCE(?, title), icon_url = COALESCE(?, icon_url), type = COALESCE(?, type), models_json = ?,
@@ -73,8 +73,15 @@ function createAppStore(db, { log = () => {} } = {}) {
   const regForSet = db.prepare('SELECT ok FROM set_app_registration WHERE set_id = ?');
   const regResults = db.prepare(`SELECT r.set_id, r.ok, r.result_json, r.updated_at, st.serial, st.room_number, st.model FROM set_app_registration r JOIN sets st ON st.id = r.set_id WHERE st.tenant_id = ? ORDER BY r.updated_at DESC`);
 
+  function tenantSettings(tenantId) {
+    let st = {}; try { st = JSON.parse((db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenantId) || {}).settings_json || '{}') || {}; } catch { /* ignore */ }
+    return st;
+  }
   function toApi(row, tenantId) {
     let models = []; try { models = JSON.parse(row.models_json || '[]'); } catch { /* ignore */ }
+    const st = tenantId ? tenantSettings(tenantId) : {};
+    const requires = row.app_id === 'netflix' && !(st.netflix_hotel_id && String(st.netflix_hotel_id).trim()) ? 'netflix_hotel_id' : null;
+    const licensed = licences ? licences.list().some((l) => l.app_id === row.app_id) : false;
     let raw = null; try { raw = row.raw_json ? JSON.parse(row.raw_json) : null; } catch { /* ignore */ }
     const agg = tenantId ? statusAgg.get(tenantId, tenantId, row.app_id) : null;
     const reported = (agg && agg.reported_sets) || 0, act = (agg && agg.activated_sets) || 0, unact = (agg && agg.unactivated_sets) || 0;
@@ -82,7 +89,7 @@ function createAppStore(db, { log = () => {} } = {}) {
     return { id: row.id, app_id: row.app_id, title: row.title, icon_url: row.icon_url, type: row.type, name_override: row.name_override, icon_override: row.icon_override,
       name: row.name_override || row.title || row.app_id, icon: row.icon_override || null, models, raw, set_count: row.set_count || 0,
       group_ids: row.group_ids ? String(row.group_ids).split(',').map(Number) : [], first_seen: row.first_seen, last_seen: row.last_seen,
-      activation, activated_sets: act, unactivated_sets: unact, reported_sets: reported, auth_status: (agg && agg.auth_status) || null };
+      activation, activated_sets: act, unactivated_sets: unact, reported_sets: reported, auth_status: (agg && agg.auth_status) || null, requires, licensed };
   }
   // What a set launches: {id, name, icon} for the tiles/menus. Icons: admin override only —
   // LG's icon paths are TV-local and not fetchable by the page, so we never send them down.
@@ -132,9 +139,12 @@ function createAppStore(db, { log = () => {} } = {}) {
   }
   // Enabled for the set's group, minus apps this set reported as NOT activated (unknown counts
   // as activated, so HCAP sets and sets that never answered register/status still get them).
+  // Netflix additionally needs the tenant's netflix_hotel_id (LG: hotel_id launch parameter).
   function enabledFor(tenant, set) {
     if (!set.group_id) return [];
     const blocked = new Set(set.id ? statusForSet.all(set.id).filter((r) => r.activated === 0).map((r) => r.app_id) : []);
+    const st = tenantSettings(tenant.id);
+    if (!(st.netflix_hotel_id && String(st.netflix_hotel_id).trim())) blocked.add('netflix');
     return enabledForGroup.all(set.group_id).filter((r) => !blocked.has(r.app_id)).map(toTv);
   }
   // Status as the set reported it: {app_id: raw} or [{id, ...}]. Returns rows written.
@@ -160,25 +170,27 @@ function createAppStore(db, { log = () => {} } = {}) {
   function activationResults(tenant) {
     return regResults.all(tenant.id).map((r) => { let result = null; try { result = JSON.parse(r.result_json); } catch { /* ignore */ } return { set_id: r.set_id, serial: r.serial, room_number: r.room_number, model: r.model, ok: r.ok == null ? null : !!r.ok, result, updated_at: r.updated_at }; });
   }
-  // Tenant-level activation config (settings_json.app_activation): {tokens: [{id, token}], accountNumber}.
+  // Tenant-level activation config (settings_json.app_activation): {accountNumber}. Tokens are
+  // per SI partner and live in the global licence store (superadmin → App licences).
   function activationConfig(tenant) {
-    let st = {}; try { st = JSON.parse((db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenant.id) || {}).settings_json || '{}') || {}; } catch { /* ignore */ }
+    const st = tenantSettings(tenant.id);
     const c = st.app_activation && typeof st.app_activation === 'object' ? st.app_activation : {};
-    return { tokens: Array.isArray(c.tokens) ? c.tokens.filter((t) => t && t.id && t.token) : [], accountNumber: c.accountNumber ? String(c.accountNumber) : '' };
+    return { accountNumber: c.accountNumber ? String(c.accountNumber) : '', licensed: licences ? licences.list().map((l) => l.app_id) : [] };
   }
-  function setActivationConfig(tenant, { tokens, accountNumber }) {
+  function setActivationConfig(tenant, { accountNumber }) {
     const row = db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenant.id);
     let st = {}; try { st = JSON.parse((row && row.settings_json) || '{}') || {}; } catch { /* ignore */ }
-    const list = (Array.isArray(tokens) ? tokens : []).map((t) => ({ id: String((t && t.id) || '').trim().slice(0, 200), token: String((t && t.token) || '').trim().slice(0, 500) })).filter((t) => t.id && t.token);
-    st.app_activation = { tokens: list, accountNumber: String(accountNumber || '').trim().slice(0, 100) };
+    st.app_activation = { accountNumber: String(accountNumber || '').trim().slice(0, 100) };
     db.prepare('UPDATE tenants SET settings_json = ? WHERE id = ?').run(JSON.stringify(st), tenant.id);
     return activationConfig(tenant);
   }
-  // Payload for the register_apps command: LG application/register takes tokenList [{id, token}]
-  // or an accountNumber.
-  function registerPayload(cfg) {
+  // Payload for application/register (register_apps command + boot registration): every stored
+  // licence token as tokenList [{id, token}], plus the tenant's accountNumber when set.
+  function registerPayload(tenant) {
     const p = {};
-    if (cfg.tokens && cfg.tokens.length) p.tokenList = cfg.tokens.map((t) => ({ id: t.id, token: t.token }));
+    const toks = licences ? licences.tokens() : [];
+    if (toks.length) p.tokenList = toks;
+    const cfg = activationConfig(tenant);
     if (cfg.accountNumber) p.accountNumber = cfg.accountNumber;
     return Object.keys(p).length ? p : null;
   }

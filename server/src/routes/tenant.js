@@ -6,7 +6,7 @@ const { decodeImageUpload } = require('../assets');
 const { hashPassword, verifyPassword } = require('../auth');
 const { syncTenantsFromDisk } = require('../tenants');
 
-const SETTING_KEYS = ['timezone', 'weather', 'logo_url', 'guest_placeholder', 'checkout_message'];
+const SETTING_KEYS = ['timezone', 'weather', 'logo_url', 'guest_placeholder', 'checkout_message', 'netflix_hotel_id'];
 
 function parseSettings(t) { try { return JSON.parse(t.settings_json || '{}') || {}; } catch { return {}; } }
 
@@ -37,6 +37,11 @@ function createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, au
     if (b.settings && typeof b.settings === 'object') {
       const cur = parseSettings(t);
       for (const k of SETTING_KEYS) if (k in b.settings) cur[k] = b.settings[k];
+      if ('netflix_hotel_id' in b.settings) {
+        const v = String(b.settings.netflix_hotel_id || '').trim();
+        if (v && !/^[A-Za-z0-9_.\-]{1,64}$/.test(v)) return res.status(400).json({ error: 'netflix_hotel_id: letters, digits, _ . - only (max 64)' });
+        cur.netflix_hotel_id = v;
+      }
       if (cur.weather) {
         const w = cur.weather;
         if (w.lat !== undefined && w.lat !== null && w.lat !== '' && !(Number(w.lat) >= -90 && Number(w.lat) <= 90)) return res.status(400).json({ error: 'latitude must be -90..90' });

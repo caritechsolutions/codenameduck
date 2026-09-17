@@ -16,6 +16,7 @@ import Settings from './pages/Settings.jsx';
 import Tenants from './pages/Tenants.jsx';
 import Media from './pages/Media.jsx';
 import Apps from './pages/Apps.jsx';
+import Licences from './pages/Licences.jsx';
 
 export const SessionCtx = React.createContext(null);
 
@@ -32,7 +33,7 @@ const NAV = [
   ['/settings', 'Settings', '⚙'],
   ['/users', 'Users', '☺'],
 ];
-const SUPER_NAV = [['/tenants', 'Tenants', '⌂']];
+const SUPER_NAV = [['/tenants', 'Tenants', '⌂'], ['/licences', 'App licences', '🔑']];
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = loading, null = logged out
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />
               {session.user.role === 'superadmin' && <Route path="/tenants" element={<Tenants />} />}
+              {session.user.role === 'superadmin' && <Route path="/licences" element={<Licences />} />}
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

@@ -145,6 +145,8 @@ test('commands: tune, volume, mute, message, toast, screenshot upload, reboot, l
   assert.ok(shot.result.bytes > 0, JSON.stringify(shot.result));
   const img = await s.stack.api('GET', `/api/admin/sets/${s.set.id}/screenshot`, undefined, s.cookie);
   assert.equal(img.status, 200);
+  await s.stack.api('PATCH', '/api/admin/tenant', { settings: { netflix_hotel_id: 'HOTEL-1' } }, s.cookie);   // B3c: Netflix needs a hotel id
+  await sleep(300);
   c = await cmd('launch_app', { app_id: 'netflix' }); assert.equal((await waitAck(c.id)).status, 'acked'); assert.equal((await s.fake()).launched[0].id, 'netflix');
   c = await cmd('reboot', {}); assert.equal((await waitAck(c.id)).status, 'acked'); assert.equal((await s.fake()).rebooted, 1);
   c = await cmd('tune', { number: 999 }); assert.equal((await waitAck(c.id)).status, 'failed');

@@ -49,15 +49,16 @@ describe('B2b pages and element actions', () => {
     await screen.findByLabelText('Layout canvas');
     expect(screen.getByLabelText('page Home').getAttribute('aria-current')).toBe('page');
     expect(within(screen.getByLabelText('page Home')).getByLabelText('home page')).toBeTruthy();
-    // selecting the info page: the button (home only) dims, the clock/tv are inherited
+    // selecting the info page: the button (home only) is not drawn at all (B3c page isolation),
+    // the clock/tv are inherited ghosts
     fireEvent.click(screen.getByLabelText('page Hotel info'));
-    expect(document.querySelector('[data-zone="btn"]').className).toMatch(/dim/);
+    expect(document.querySelector('[data-zone="btn"]')).toBeNull();
     expect(document.querySelector('[data-zone="clock"]').className).toMatch(/inherited/);
-    expect(document.querySelector('[data-zone="infotext"]').className).not.toMatch(/dim/);
-    // page settings in the panel; inherit off → the clock dims too
+    expect(document.querySelector('[data-zone="infotext"]').className).not.toMatch(/ghost/);
+    // page settings in the panel; inherit off → the clock disappears too
     expect(screen.getByLabelText('Page name').value).toBe('Hotel info');
     fireEvent.click(screen.getByLabelText('Inherit global zones from home'));
-    expect(document.querySelector('[data-zone="clock"]').className).toMatch(/dim/);
+    expect(document.querySelector('[data-zone="clock"]')).toBeNull();
     expect(jsonDoc().pages[1].inherit).toBe(false);
     // add + rename
     fireEvent.click(screen.getByLabelText('Add page'));

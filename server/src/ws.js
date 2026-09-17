@@ -121,10 +121,11 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
     insertEvent.run(tenantId, setId, name, JSON.stringify(payload).slice(0, 4000));
     if (name === 'tv_error') log(`TV ERROR set ${setId}: [${payload.kind || '?'}] ${payload.message || ''}`);
     // app activation reports (B3b): keep the per-set tables and re-push the enabled apps
-    if (apps && (name === 'tv_apps_status' || name === 'tv_apps_registration')) {
+    if (apps && (name === 'tv_apps_status' || name === 'tv_apps_registration' || name === 'tv_apps_list')) {
       try {
         const tenant = findTenant.get(tenantId);
         if (name === 'tv_apps_status') apps.recordStatus(tenant, { id: setId }, payload.status);
+        else if (name === 'tv_apps_list') apps.record(tenant, findSet.get(setId, tenantId) || { id: setId }, payload.apps);
         else apps.recordRegistration(tenant, { id: setId }, { ok: payload.ok, result: payload.result });
         refresh(tenantId, { setIds: [setId] });
       } catch (e) { log(`apps status for set ${setId} failed: ${e.message}`); }

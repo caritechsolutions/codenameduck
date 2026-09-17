@@ -17,7 +17,8 @@ export var KEY = {
   CH_UP: 0x1AB, CH_DOWN: 0x1AC, VOL_UP: 0x1BF, VOL_DOWN: 0x1C0, MUTE: 0x1C1,
   BACK: 0x1CD, EXIT: 0x3E9, INFO: 0x1C9, GUIDE: 0x1CA, PORTAL: 0x25A, MENU: 0x12, SETTINGS: 0x263,
   RED: 0x193, GREEN: 0x194, YELLOW: 0x195, BLUE: 0x196,
-  PLAY: 0x19F, PAUSE: 0x13, STOP: 0x19D, REWIND: 0x19C, FAST_FORWARD: 0x1A1, LAST_CH: 0x2C7, TV: 0x2DA, SMART_HOME: 0x2DE
+  PLAY: 0x19F, PAUSE: 0x13, STOP: 0x19D, REWIND: 0x19C, FAST_FORWARD: 0x1A1, LAST_CH: 0x2C7, TV: 0x2DA, SMART_HOME: 0x2DE,
+  NETFLIX: 0x40D   // 1037, remote hot key (docs/lg/netflix.md); claimed so a NORMAL/WARM press launches with LG's params
 };
 export var KEY_NAME = {};
 Object.keys(KEY).forEach(function (k) { KEY_NAME[KEY[k]] = k; });
@@ -287,6 +288,12 @@ export function getPowerMode() {
     if (r.mode !== undefined) return typeof r.mode === 'number' ? (r.mode === 2 ? 'WARM' : 'NORMAL') : String(r.mode);
     return null;
   }, function () { return null; });
+}
+// LG service country (docs/lg/netflix.md: must not be "Others"/"ZZ" or Netflix registration and
+// launch fail). IDCAP configuration/servicecountry/get, raw reply; HCAP has no equivalent → null.
+export function getServiceCountry() {
+  if (api !== 'idcap') return Promise.resolve(null);
+  return idcapCall('idcap://configuration/servicecountry/get', {}).then(function (r) { return r == null ? null : r; }, function () { return null; });
 }
 export function setPowerMode(mode) {
   var m = String(mode).toUpperCase() === 'WARM' ? 'WARM' : 'NORMAL';

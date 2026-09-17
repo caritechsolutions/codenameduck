@@ -20,7 +20,7 @@ test('activation: status reported, un-activated app hidden, register_apps comman
   const l = (await stack.api('POST', '/api/admin/layouts', { name: 'L', json: layout }, cookie)).json;
   const g = (await stack.api('POST', '/api/admin/groups', { name: 'G' }, cookie)).json;
   await stack.api('PUT', `/api/admin/groups/${g.id}/layout`, { layout_id: l.id }, cookie);
-  await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id }, cookie);
+  await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, settings: { netflix_hotel_id: 'HOTEL-1' } }, cookie);   // B3c: Netflix needs a hotel id
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await page.addInitScript(fakeIdcap('305MAXX1Z123'));   // fake: netflix 'unregistered', the rest 'registered'
   await page.goto(stack.url);
@@ -41,13 +41,15 @@ test('activation: status reported, un-activated app hidden, register_apps comman
   await page.waitForFunction(() => document.querySelectorAll('#zone-apps .apptile').length === 1, null, { timeout: 5000 });
   assert.deepEqual(await page.$$eval('#zone-apps .apptile .appname', (els) => els.map((e) => e.textContent)), ['YouTube']);
   // tokens → register_apps: the set calls application/register, gets the event, acks, re-reads status
-  await stack.api('PUT', '/api/admin/apps/activation', { tokens: [{ id: 'netflix', token: 'NFX-1' }] }, cookie);
+  // B3c: tokens come from the superadmin licence store (one .lic file per app)
+  const lic = await stack.api('POST', '/api/admin/licences', { files: [{ filename: 'NETFLIX_caritech.lic', content: 'TkZYLTEtbmV0ZmxpeC10b2tlbg==' }] }, cookie);
+  assert.equal(lic.status, 200, JSON.stringify(lic.json));
   const run = await stack.api('POST', '/api/admin/apps/activation/run', {}, cookie);
   assert.equal(run.json.queued, 1);
   await page.waitForFunction(() => document.querySelectorAll('#zone-apps .apptile').length === 2, null, { timeout: 8000 });
   assert.deepEqual(await page.$$eval('#zone-apps .apptile .appname', (els) => els.map((e) => e.textContent)), ['Netflix', 'YouTube']);
   f = await fake();
-  assert.deepEqual(f.registered, [{ tokenList: [{ id: 'netflix', token: 'NFX-1' }] }]);
+  assert.deepEqual(f.registered, [{ tokenList: [{ id: 'netflix', token: 'TkZYLTEtbmV0ZmxpeC10b2tlbg==' }] }]);
   assert.ok(f.calls.filter((c) => c.uri === 'idcap://application/register/status' && c.p.id === 'netflix').length >= 2, 'status re-read after registering');
   await sleep(200);
   const detail = (await stack.api('GET', `/api/admin/sets/${set.id}`, undefined, cookie)).json;
@@ -56,7 +58,7 @@ test('activation: status reported, un-activated app hidden, register_apps comman
   assert.ok(detail.events.some((e) => e.type === 'tv_apps_registration'));
   assert.ok(detail.events.some((e) => e.type === 'tv_apps_status'));
   const act = (await stack.api('GET', '/api/admin/apps/activation', undefined, cookie)).json;
-  assert.equal(act.results.length, 1); assert.equal(act.results[0].ok, true); assert.equal(act.results[0].result.result, true);
+  assert.equal(act.results.length, 1); assert.equal(act.results[0].ok, true); assert.equal(act.results[0].result.tokenResult, true);   // LG's documented field (docs/lg/netflix.md)
   apps = (await stack.api('GET', '/api/admin/apps', undefined, cookie)).json;
   assert.equal(apps.find((a) => a.app_id === 'netflix').activation, 'activated');
   await page.close();

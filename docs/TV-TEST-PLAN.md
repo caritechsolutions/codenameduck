@@ -335,3 +335,42 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
 5. **Event name check.** If the command stays `sent` for 20 s and acks with `timeout: true`, LG
    did not fire `application_registration_result_received` (or fires it under another name) —
    tell me; the status re-read still runs and the badge tells the truth either way.
+
+## Phase 3 Part B3c — editor page isolation, app licences, Netflix launch
+
+Before the set: work through `docs/TENANT-NETWORK-CHECKLIST.md` for the hotel network (NTP and
+the LG SDP URL must be reachable, TV time set, service country not "Others").
+
+1. **Editor page isolation.** Open a layout with two pages. With "Hotel information" selected only
+   that page's zones are drawn; the TV, channel list, clock and OSD boxes from Home appear dashed
+   and greyed with "inherited from Home" and cannot be clicked, shift-clicked, marquee-selected or
+   nudged. Drag on empty canvas draws a marquee that selects only this page's zones. Align /
+   distribute / front-back act on the page's zones only. Switching pages clears the selection.
+2. **Licence upload (superadmin).** Log in as `admin` → App licences. Drop the LG `.lic` files
+   (`NETFLIX_*.lic`, and any of `AMAZON_*.lic`, `AirPlay_*.lic`, `GOOGLE CAST_*.lic`). Each row
+   shows the app id, file name and only the last 6 characters of the token. The journal logs
+   `licences added …`. `ls -l /srv/coopcentric/data/secret.key` → `-rw------- www-data`. The ids
+   `airplay` / `googlecast` are our guess: compare with the ids in Apps → Raw (application/list) and
+   correct them in the table if LG names them differently.
+3. **Netflix hotel id.** Settings → "Netflix hotel id" empty: Apps shows Netflix with
+   "needs hotel id → Settings" and the set's Apps zone hides Netflix even when enabled. Enter an id
+   (e.g. `CARI-HOTELDEMO-001`), Save → the tile appears within seconds.
+4. **Boot registration.** Factory-reset or take a set that reports Netflix `unregistered`
+   (Apps → Raw) and power-cycle it. Journal / drawer events: `service_country` (must not be
+   Others), `apps_registration` with `tokenResult: true`, `apps_list`, `apps_status`; Apps flips
+   Netflix to **activated** without any admin action; no `register_apps` command is needed for
+   a set that already succeeded once. If LG answers `tokenResult: false` the drawer shows a
+   `tv_error app_registration` with LG's `errorMessage` — tell me the text.
+5. **Launch parameters.** Apps → enable Netflix for the group. OK on the tile: Netflix opens
+   (LG splash allowed) — the `tv_app` event shows `source: launcher`. Press the remote's
+   **NETFLIX** key while the set is on: `source: hotkey`, and Netflix opens. Put the set in standby
+   (Instant On group) and press NETFLIX: it wakes straight into Netflix (`reason: boot`).
+   Then check Netflix itself: sign-in works and no "authorize error".
+6. **Service country.** If the set was shipped with Location = Others, the drawer shows
+   `LG service country is "Others" — set it …` as the last error at every boot; fix it in the TV's
+   General > System > Location menu and power-cycle: the error stops.
+7. **Amazon (Prime Video).** Only on the STB-6500 (webOS 5.0): with `AMAZON_*.lic` on file it
+   registers the same way; no launch parameters. On the 43UM670H0UA it is expected to stay
+   whatever `application/list` reports.
+8. **Tenant admin.** Log in as a tenant-admin: no "App licences" entry; Apps → Activation shows
+   "Licences on file: netflix" and only the account-number field.

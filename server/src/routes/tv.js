@@ -74,10 +74,17 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
     let appsSeen = 0;
     if (apps && b.apps) { try { appsSeen = apps.record(tenant, set, b.apps); } catch (e) { log(`${tenant.name}: apps record failed for ${serial}: ${e.message}`); } }
     if (apps && b.apps_status) { try { apps.recordStatus(tenant, set, b.apps_status); } catch (e) { log(`${tenant.name}: apps status failed for ${serial}: ${e.message}`); } }
-    // Tenant has activation tokens / an account number and this set never registered them → do it now.
+    // Licence tokens / account number on file and this set never registered them → do it now.
     if (apps && commands) {
-      const payload = apps.registerPayload(apps.activationConfig(tenant));
+      const payload = apps.registerPayload(tenant);
       if (payload && !apps.hasRegistered(set)) commands.queue(tenant, set, 'register_apps', payload, { dedupe: true });
+    }
+    // Netflix preflight (docs/lg/netflix.md): the LG service country must not be "Others"/ZZ.
+    const country = b.service_country == null ? null : (typeof b.service_country === 'object' ? (b.service_country.country || b.service_country.code || b.service_country.value || JSON.stringify(b.service_country)) : String(b.service_country));
+    if (country != null) {
+      const bad = /^(others?|zz|unknown)$/i.test(String(country).trim());
+      hub.recordTvEvent(tenant.id, set.id, { name: 'service_country', payload: { country, ok: !bad } });
+      if (bad) { hub.recordTvEvent(tenant.id, set.id, { name: 'error', payload: { kind: 'service_country', message: `LG service country is "${country}" — set it (General > System > Location) or Netflix registration/launch will fail` } }); }
     }
 
     // Admin-assigned room wins: if the TV's own property disagrees, queue a fix (PLATFORM.md §4).
@@ -92,7 +99,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
       }
     }
 
-    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}`);
+    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}${country != null ? ` country=${country}` : ''}`);
     res.json({ ...state.build(tenant, set), token: set.token, created });
   });
 

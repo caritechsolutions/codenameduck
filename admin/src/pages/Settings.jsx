@@ -21,7 +21,7 @@ export default function Settings() {
     const s = tenant.data.settings || {};
     setF({ display_name: tenant.data.display_name, default_layout_id: tenant.data.default_layout_id || '', default_lineup_id: tenant.data.default_lineup_id || '',
       timezone: s.timezone || '', lat: (s.weather && s.weather.lat) ?? '', lon: (s.weather && s.weather.lon) ?? '', units: (s.weather && s.weather.units) || 'metric',
-      guest_placeholder: s.guest_placeholder || '', checkout_message: s.checkout_message || '' });
+      guest_placeholder: s.guest_placeholder || '', checkout_message: s.checkout_message || '', netflix_hotel_id: s.netflix_hotel_id || '' });
   }, [tenant.data]);
   if (!f) return <div className="muted">Loading…</div>;
 
@@ -29,7 +29,7 @@ export default function Settings() {
     e.preventDefault(); setSaving(true);
     try {
       const t = await patch('/tenant', { display_name: f.display_name, default_layout_id: f.default_layout_id ? Number(f.default_layout_id) : null, default_lineup_id: f.default_lineup_id ? Number(f.default_lineup_id) : null,
-        settings: { timezone: f.timezone, weather: { lat: f.lat === '' ? null : Number(f.lat), lon: f.lon === '' ? null : Number(f.lon), units: f.units }, guest_placeholder: f.guest_placeholder, checkout_message: f.checkout_message } });
+        settings: { timezone: f.timezone, weather: { lat: f.lat === '' ? null : Number(f.lat), lon: f.lon === '' ? null : Number(f.lon), units: f.units }, guest_placeholder: f.guest_placeholder, checkout_message: f.checkout_message, netflix_hotel_id: f.netflix_hotel_id.trim() } });
       tenant.setData(t); session.refresh(); toast('Settings saved · pushed to online sets');
     } catch (err) { toast(err.message, 'bad'); } finally { setSaving(false); }
   }
@@ -60,6 +60,7 @@ export default function Settings() {
             <Field label="Time zone (informational)"><input value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} placeholder="Europe/Amsterdam" /></Field>
           </div>
           <Field label="Checkout message (shown on the TV after checkout)"><input value={f.checkout_message} onChange={(e) => setF({ ...f, checkout_message: e.target.value })} placeholder="Thank you for staying with us" /></Field>
+          <Field label="Netflix hotel id" hint="Required before Netflix can be enabled for this hotel. Any code that identifies this one property to LG/Netflix (e.g. the billing id); letters, digits, _ . - only. Sent with every Netflix launch (docs/lg/netflix.md)."><input value={f.netflix_hotel_id} onChange={(e) => setF({ ...f, netflix_hotel_id: e.target.value })} aria-label="Netflix hotel id" placeholder="e.g. CARI-HOTELDEMO-001" /></Field>
           <h2 style={{ marginTop: 16 }}>Weather</h2>
           <div className="row">
             <Field label="Latitude"><input value={f.lat} onChange={(e) => setF({ ...f, lat: e.target.value })} placeholder="51.5" aria-label="Latitude" /></Field>

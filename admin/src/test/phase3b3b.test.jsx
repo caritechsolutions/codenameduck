@@ -14,7 +14,7 @@ const GROUPS = [{ id: 1, name: 'Rooms', set_count: 4 }];
 
 function fakeApi() {
   const me = { user: { id: 1, username: 'admin', role: 'superadmin', tenant_id: null }, tenant: { id: 1, name: 'hoteldemo', hostname: 'h', display_name: 'Hotel Demo', settings: {} } };
-  const state = { calls: [], config: { tokens: [], accountNumber: '' }, results: [] };
+  const state = { calls: [], config: { accountNumber: '', licensed: [] }, results: [] };
   const json = (status, body) => Promise.resolve({ ok: status < 400, status, text: () => Promise.resolve(JSON.stringify(body)) });
   global.fetch = vi.fn((url, init = {}) => {
     const path = url.replace(/^\/api\/admin/, '').split('?')[0];
@@ -23,7 +23,7 @@ function fakeApi() {
     if (path === '/me') return json(200, me);
     if (path === '/apps' && method === 'GET') return json(200, APPS);
     if (path === '/apps/activation' && method === 'GET') return json(200, { config: state.config, results: state.results });
-    if (path === '/apps/activation' && method === 'PUT') { state.config = { tokens: body.tokens.filter((t) => t.id && t.token), accountNumber: body.accountNumber || '' }; return json(200, { config: state.config }); }
+    if (path === '/apps/activation' && method === 'PUT') { state.config = { ...state.config, accountNumber: body.accountNumber || '' }; return json(200, { config: state.config }); }
     if (path === '/apps/activation/run') { state.results = [{ set_id: 5, serial: 'S5', room_number: '101', model: 'M', ok: true, result: { result: true }, updated_at: new Date().toISOString() }]; return json(200, { queued: body.group_id ? 4 : 9, command_ids: [] }); }
     if (path === '/groups') return json(200, GROUPS);
     if (['/sets', '/media', '/layouts', '/lineups'].includes(path)) return json(200, []);
@@ -52,29 +52,34 @@ describe('B3b app activation', () => {
     expect(dlg.textContent).toMatch(/"register_status": "unregistered"/);
   });
 
-  it('activation panel: tokens + account number saved, register now queues on all sets or a group, results listed', async () => {
+  it('activation panel (B3c): licences come from the superadmin store, tenant adds an account number, register now queues on all sets or a group, results listed', async () => {
     renderAt('/apps');
     await screen.findByText('Netflix');
     expect(screen.getByText('No set has reported a registration result yet.')).toBeTruthy();
+    expect(screen.getByTestId('licensed-apps').textContent).toBe('none yet');
+    expect(screen.queryByLabelText('Token')).toBeNull();   // no per-tenant token entry any more
     const registerBtn = screen.getByText('Register now');
     expect(registerBtn.disabled).toBe(true);   // nothing to register yet
-    fireEvent.click(screen.getByText('Add token'));
-    fireEvent.change(screen.getByLabelText('Token app'), { target: { value: 'netflix' } });
-    fireEvent.change(screen.getByLabelText('Token'), { target: { value: 'NFX-123' } });
+    fireEvent.change(screen.getByLabelText('Account number'), { target: { value: 'ACC-9' } });
     expect(screen.getByText('Register now').disabled).toBe(false);
     fireEvent.click(screen.getByText('Save'));
-    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PUT' && p === '/apps/activation' && b.tokens[0].id === 'netflix' && b.tokens[0].token === 'NFX-123')).toBe(true));
+    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PUT' && p === '/apps/activation' && b.accountNumber === 'ACC-9' && b.tokens === undefined)).toBe(true));
     fireEvent.change(screen.getByLabelText('Register group'), { target: { value: '1' } });
     fireEvent.click(screen.getByText('Register now'));
     await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'POST' && p === '/apps/activation/run' && b.group_id === 1)).toBe(true));
     expect(await screen.findByText('Room 101', {}, { timeout: 4000 })).toBeTruthy();
     expect(screen.getByText('registered')).toBeTruthy();
-    // account number path
-    fireEvent.click(screen.getByLabelText('remove token'));
-    fireEvent.change(screen.getByLabelText('Account number'), { target: { value: 'ACC-9' } });
     fireEvent.change(screen.getByLabelText('Register group'), { target: { value: '' } });
     fireEvent.click(screen.getByText('Register now'));
-    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PUT' && p === '/apps/activation' && b.accountNumber === 'ACC-9' && b.tokens.length === 0)).toBe(true));
     await waitFor(() => expect(state.calls.filter(([m, p]) => m === 'POST' && p === '/apps/activation/run').length).toBe(2));
+  });
+
+  it('activation panel with a licence on file: register enabled without an account number; superadmin link to App licences', async () => {
+    state.config.licensed = ['netflix'];
+    renderAt('/apps');
+    await screen.findByText('Netflix');
+    await waitFor(() => expect(screen.getByTestId('licensed-apps').textContent).toBe('netflix'));
+    expect(screen.getByText('Register now').disabled).toBe(false);
+    expect(screen.getAllByRole('link', { name: 'App licences' }).every((a) => a.getAttribute('href') === '/licences')).toBe(true);   // nav entry + panel link
   });
 });

@@ -35,7 +35,7 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
   function context(tenant, set) {
     const st = settingsOf(tenant);
     return { hotel: tenant.display_name || tenant.name, room: set.room_number || '', guest: st.guest_placeholder || '', serial: set.serial,
-      logo: st.logo_url || '', units: (st.weather && st.weather.units) || 'metric' };
+      logo: st.logo_url || '', units: (st.weather && st.weather.units) || 'metric', netflix_hotel_id: st.netflix_hotel_id ? String(st.netflix_hotel_id) : '' };
   }
 
   function commandsFor(set) {
@@ -57,6 +57,7 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
       lineup_id: lineup.id,
       messages: activeMessages.all({ tenant_id: tenant.id, set_id: set.id, group_id: set.group_id || -1 }),
       apps: apps ? apps.enabledFor(tenant, set) : [],      // enabled for the set's group: [{id, name, icon}]
+      activation: apps ? apps.registerPayload(tenant) : null,   // {tokenList, accountNumber} the set registers at boot when needed
       commands: commandsFor(set),
       ws_url: '/ws/tv',
       poll_interval_s: pollIntervalS,

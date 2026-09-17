@@ -12,7 +12,8 @@ import * as model from '../../shared/layout-model.js';
 var APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number', 'instant_power'];
 var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000];
-var CLAIMED_KEYS = ['CH_UP', 'CH_DOWN', 'NUM_0', 'NUM_1', 'NUM_2', 'NUM_3', 'NUM_4', 'NUM_5', 'NUM_6', 'NUM_7', 'NUM_8', 'NUM_9', 'PORTAL', 'GUIDE', 'INFO', 'BACK', 'LAST_CH'];
+var CLAIMED_KEYS = ['CH_UP', 'CH_DOWN', 'NUM_0', 'NUM_1', 'NUM_2', 'NUM_3', 'NUM_4', 'NUM_5', 'NUM_6', 'NUM_7', 'NUM_8', 'NUM_9', 'PORTAL', 'GUIDE', 'INFO', 'BACK', 'LAST_CH', 'NETFLIX'];
+var NETFLIX_LAUNCHER_VERSION = '1.0';
 var BANNER_MS = 3500;
 var DIGIT_TIMEOUT_MS = 2500;
 
@@ -29,7 +30,7 @@ var state = {
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
-  apps: [], appsReported: null, appsStatus: null, hiddenAt: null
+  apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, serviceCountry: null
 };
 
 // ---------------------------------------------------------------- logging
@@ -65,6 +66,7 @@ function register() {
   PROPERTY_KEYS.forEach(function (k) { body[k] = state.props[k]; });
   if (state.appsReported) body.apps = state.appsReported;   // idcap://application/list result, raw
   if (state.appsStatus) body.apps_status = state.appsStatus;   // idcap://application/register/status per app, raw
+  if (state.serviceCountry != null) body.service_country = state.serviceCountry;   // configuration/servicecountry/get, raw (server flags "Others")
   return request('POST', '/api/tv/register', body);
 }
 function poll() { return request('GET', '/api/tv/poll' + authQs()); }
@@ -456,8 +458,7 @@ function doAction(action, arg) {
     case 'toggle': if (a.zone) { state.toggled[a.zone] = !state.toggled[a.zone]; render(); } break;
     case 'launch_app':
       if (a.app_id) {
-        sendEvent('app', { kind: 'launch', app_id: a.app_id });
-        tv.launchApp(a.app_id, arg && arg.params, arg && arg.noSplash).then(null, function (e) { reportError('launch', 'launch ' + a.app_id + ' failed: ' + e.message, { app_id: a.app_id }); });
+        launchApp(a.app_id, arg && arg.params, arg && arg.noSplash, 'launcher').then(null, function (e) { reportError('launch', 'launch ' + a.app_id + ' failed: ' + e.message, { app_id: a.app_id }); });
       }
       break;
     case 'tune': if (a.number != null) { var c = findChannel(a.number); if (c) tuneTo(c); } break;
@@ -537,6 +538,7 @@ function onKeyDown(ev) {
   else if (name === 'ENTER' && state.digits) commitDigits();
   else if (name === 'LAST_CH') { var prev = findChannel(state.prevChannel); if (prev) tuneTo(prev); }
   else if (name === 'INFO') { if (state.channel) channelBanner(); else handled = false; }
+  else if (name === 'NETFLIX') launchApp('netflix', null, undefined, 'hotkey').then(null, function (e) { reportError('launch', 'netflix hot key: ' + e.message, { app_id: 'netflix' }); });
   else if (keys[name]) doAction(keys[name]);
   else if (name === 'PORTAL' || name === 'GUIDE') doAction({ type: 'fullscreen_tv' });
   else if (name === 'BACK' || name === 'EXIT') doAction({ type: 'back' });
@@ -614,6 +616,7 @@ function applyState(data) {
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
   if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
   if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
+  if (data.activation !== undefined) { state.activation = data.activation || null; bootRegisterApps(); }
 }
 
 // ---------------------------------------------------------------- commands
@@ -678,11 +681,8 @@ function runCommand(cmd, ack) {
           return { checkout: true };
         });
         break;
-      case 'launch_app': r = tv.launchApp(p.app_id, p.params).then(function () { return { app_id: p.app_id }; }); break;
-      case 'register_apps': r = registerApps(p).then(function (res) {
-        sendEvent('apps_registration', { ok: res.ok, result: res.result });
-        return refreshAppStatus().then(function () { if (res.ok === false) throw new Error('registration failed: ' + JSON.stringify(res.result)); return res; });
-      }); break;
+      case 'launch_app': r = launchApp(p.app_id, p.params, p.noSplash, 'launcher').then(function (sent) { return { app_id: p.app_id, params: sent }; }); break;
+      case 'register_apps': r = registerAndRefresh(p).then(function (res) { if (res.ok === false) throw new Error('registration failed: ' + JSON.stringify(res.result)); return res; }); break;
       default: r = Promise.reject(new Error('unsupported command ' + cmd.type));
     }
   } catch (e) { r = Promise.reject(e); }
@@ -826,7 +826,8 @@ function readProperties() {
   var p = Promise.resolve();
   PROPERTY_KEYS.forEach(function (k) { p = p.then(function () { return tv.getProperty(k).then(function (v) { state.props[k] = v; }); }); });
   return p.then(function () { return tv.displayResolution(); }).then(function (osd) { state.osd = osd; })
-    .then(function () { return tv.getPowerMode(); }).then(function (pm) { state.powerMode = pm; });
+    .then(function () { return tv.getPowerMode(); }).then(function (pm) { state.powerMode = pm; })
+    .then(function () { return tv.getServiceCountry(); }).then(function (sc) { state.serviceCountry = sc; if (sc != null) log('service country: ' + JSON.stringify(sc)); });
 }
 // Another app (Netflix…) in front: stop our picture so it does not fight the app's; when we
 // are back, resume where we were and claim the remote keys again (LG hands them to the app).
@@ -889,12 +890,87 @@ function registerApps(payload) {
     var t = setTimeout(function () { if (!done) { done = true; resolve({ ok: null, result: { timeout: true } }); } }, 20000);
     var onResult = function (ev) {
       if (done) return; done = true; clearTimeout(t);
-      var r = {}; ['result', 'status', 'errorMessage', 'id', 'tokenList', 'accountNumber', 'detail'].forEach(function (k) { if (ev && ev[k] !== undefined) r[k] = ev[k]; });
-      var ok = ev && (ev.result === true || ev.result === 'success' || ev.status === 'success' || ev.status === 'registered') ? true : (ev && (ev.result === false || ev.errorMessage) ? false : null);
+      // LG (docs/lg/netflix.md): p.id, p.tokenResult (boolean), p.errorMessage. Older/other shapes kept.
+      var r = {}; ['tokenResult', 'result', 'status', 'errorMessage', 'id', 'tokenList', 'accountNumber', 'detail'].forEach(function (k) { if (ev && ev[k] !== undefined) r[k] = ev[k]; });
+      var ok = ev && (ev.tokenResult === true || ev.result === true || ev.result === 'success' || ev.status === 'success' || ev.status === 'registered') ? true
+        : (ev && (ev.tokenResult === false || ev.result === false || ev.errorMessage) ? false : null);
       resolve({ ok: ok, result: r });
     };
     tv.on('application_registration_result_received', onResult);
     tv.registerApps(payload).then(null, function (e) { if (!done) { done = true; clearTimeout(t); reject(e); } });
+  });
+}
+// Registration + status refresh shared by the register_apps command and the boot path.
+function registerAndRefresh(payload) {
+  if (state.registering) return Promise.reject(new Error('registration already in progress'));
+  state.registering = true;
+  var done = function () { state.registering = false; };
+  return registerApps(payload).then(function (res) {
+    sendEvent('apps_registration', { ok: res.ok, result: res.result });
+    // controlled apps only appear in application/list once registered → re-read the list too
+    return readAppList().then(function () {
+      if (state.appsReported) sendEvent('apps_list', { apps: state.appsReported });
+      if (state.appsStatus) sendEvent('apps_status', { status: state.appsStatus });
+      done(); return res;
+    });
+  }, function (e) { done(); throw e; });
+}
+// Does the raw register/status reply say "not authorised"? Mirrors the server's normalizeAuth.
+function statusActivated(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'boolean') return raw;
+  var v = null;
+  if (typeof raw === 'string' || typeof raw === 'number') v = String(raw);
+  else if (typeof raw === 'object') {
+    var keys = ['auth', 'auth_status', 'authStatus', 'status', 'registered', 'activated', 'activation', 'result', 'state', 'value'];
+    for (var i = 0; i < keys.length; i++) { if (raw[keys[i]] !== undefined && raw[keys[i]] !== null) { v = raw[keys[i]]; break; } }
+    if (typeof v === 'boolean') return v;
+    if (v == null) return null; v = String(v);
+  }
+  if (/^(unregist|not|un|fail|deni|invalid|error|no$)/i.test(v)) return false;
+  if (/^(regist|authori|ok|success|valid|activ|true|yes|1$)/i.test(v)) return true;
+  return null;
+}
+// Boot activation (docs/lg/netflix.md): the state payload carries every licence token on file
+// (+ the tenant's account number). If any token's app is missing from application/list or its
+// register/status is not authorised, register them all once per boot. The register_apps command
+// (queued by the server for sets without a successful registration) is the same path.
+function bootRegisterApps() {
+  var a = state.activation;
+  if (!a || state.bootRegistered || state.registering || state.api !== 'idcap') return;
+  var tokens = Array.isArray(a.tokenList) ? a.tokenList : [];
+  if (!tokens.length && !a.accountNumber) return;
+  var ids = reportedAppIds(), st = state.appsStatus || {};
+  var need = tokens.filter(function (t) { return t && t.id && (ids.indexOf(t.id) < 0 || statusActivated(st[t.id]) === false); }).map(function (t) { return t.id; });
+  if (!need.length) { state.bootRegistered = true; return; }
+  state.bootRegistered = true;
+  log('registering app licences at boot: ' + need.join(','));
+  registerAndRefresh(a).then(function (res) { log('boot registration ' + (res.ok === false ? 'FAILED' : 'done')); if (res.ok === false) reportError('app_registration', 'licence registration failed: ' + JSON.stringify(res.result), { apps: need }); },
+    function (e) { reportError('app_registration', 'licence registration: ' + e.message, { apps: need }); });
+}
+// Launch an app with LG's parameters. Netflix (docs/lg/netflix.md) needs the tenant's hotel id and
+// a reason: 'launcher' (tile/menu/command), 'hotKey' (remote key while ON), 'boot' with
+// params.reason 'netflix' (remote key while the set is in WARM standby). Other apps: as given.
+function netflixParams(reason) {
+  var hotel = state.context && state.context.netflix_hotel_id;
+  var inner = { hotel_id: hotel, launcher_version: NETFLIX_LAUNCHER_VERSION };
+  if (reason === 'boot') inner.reason = 'netflix';
+  return { reason: reason, params: inner };
+}
+function launchApp(appId, params, noSplash, source) {
+  sendEvent('app', { kind: 'launch', app_id: appId, source: source || 'launcher' });
+  if (appId !== 'netflix') return tv.launchApp(appId, params, noSplash).then(function () { return params || {}; });
+  if (!(state.context && state.context.netflix_hotel_id)) {
+    showPopup('Netflix is not enabled for this hotel', 6);
+    return Promise.reject(new Error('netflix_hotel_id not set for this tenant (Settings → Netflix hotel id)'));
+  }
+  var mode = source === 'hotkey' ? tv.getPowerMode().then(function (pm) { return pm; }, function () { return state.powerMode; }) : Promise.resolve(null);
+  return mode.then(function (pm) {
+    if (pm) state.powerMode = pm;
+    var reason = source === 'hotkey' ? (/warm/i.test(String(pm || state.powerMode || '')) ? 'boot' : 'hotKey') : 'launcher';
+    var sent = params && params.reason ? params : netflixParams(reason);
+    // LG's own example launches Netflix with noSplash false
+    return tv.launchApp('netflix', sent, noSplash === undefined ? false : noSplash).then(function () { return sent; });
   });
 }
 function boot() {

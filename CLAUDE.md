@@ -410,3 +410,39 @@ Decisions already made (do not re-open):
 - Admin Apps page: Activation column + greyed rows for not-activated apps (admin only), Raw
   dialog shows the register/status value, Activation panel (tokens per app id, account number,
   register on all sets / a group, per-set results).
+
+### Part B3c — editor page isolation, app licences, Netflix launch (2026-09-17)
+
+- Editor: `editor/geometry.js` `editableZoneIds(doc, page)` (the page's own zones + OSD placement
+  zones on home) and `ghostZoneIds()` (inherited globals on a non-home page). `CanvasEditor` draws
+  only those two sets: ghosts are `.czone.ghost` (pointer-events none, `data-ghost="1"`, label
+  "inherited from Home"), never selectable; zones of other pages are not in the DOM. Marquee select
+  on empty canvas (`.marquee`), page-scoped z-order (`moveZoneOrder(doc, id, dir, pageId)`),
+  `LayoutEdit` drops any selected id that is not editable on the current page.
+- Licences: migration 011 `licences` (one row per app id), `server/src/licences.js` — AES-256-GCM
+  with `<dataDir>/secret.key` (32 hex bytes; `install.sh` creates it as www-data mode 600, the
+  server creates it on first use otherwise), blob `v1:<iv>:<tag>:<ct>`; `appIdForFilename` maps
+  `NETFLIX_`/`AMAZON_`/`AirPlay_`/`GOOGLE CAST_` → `netflix`/`amazon`/`airplay`/`googlecast` (the
+  last two are guesses, editable). `routes/licences.js` (superadmin): `GET/POST /api/admin/licences`
+  (`{files:[{filename, content, app_id?}]}` → `{added, replaced, errors, licences}`),
+  `PATCH /:id {app_id}`, `DELETE /:id`; only `tail` (last 6 chars) leaves the server. Tokens are per
+  SI partner → global. Admin page `pages/Licences.jsx` (superadmin nav "App licences").
+- Activation: `apps.registerPayload(tenant)` = all licence tokens + the tenant's `accountNumber`
+  (the only per-tenant option left; `PUT /api/admin/apps/activation {accountNumber}`, config
+  returns `{accountNumber, licensed:[ids]}`). The TV state payload carries it as `activation`; the
+  renderer registers at boot (IDCAP only, once per boot) when a licensed app is missing from
+  `application/list` or its `register/status` is not authorised, then re-reads list+status and
+  sends `apps_list` / `apps_status` / `apps_registration` events (`ws.js` records `tv_apps_list`).
+  The server still queues `register_apps` once for sets without a recorded success. Result event
+  fields per LG: `id`, `tokenResult` (bool), `errorMessage`.
+- Netflix (docs/lg/netflix.md): tenant setting `netflix_hotel_id` (Settings; `^[A-Za-z0-9_.-]{1,64}$`);
+  without it `enabledFor()` drops netflix, `toApi` sets `requires: 'netflix_hotel_id'`, and the
+  renderer refuses to launch with an on-screen note. Launch params
+  `{reason, params:{hotel_id, launcher_version:'1.0'}}`: `launcher` from tiles/menus/commands,
+  `hotKey` on the remote's NETFLIX key (`KEY.NETFLIX = 0x40D`, claimed) in NORMAL, `boot` +
+  `params.reason:'netflix'` when `power/powermode/get` says WARM; Netflix launches with
+  `noSplash:false`. Register body carries `service_country` (`configuration/servicecountry/get`,
+  raw); the server records a `service_country` event and a `tv_error` for Others/ZZ/unknown.
+- `docs/TENANT-NETWORK-CHECKLIST.md`: NPM websockets, `*.pool.ntp.org`,
+  `https://GR.lgtvsdp.com/rest/sdp/v13.0/initservices`, TV time, service country, hotel id.
+- Amazon (`amazon`) is token-only and STB-6500 / webOS 5.0 only; nothing app-specific is sent.

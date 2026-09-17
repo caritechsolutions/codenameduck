@@ -8,6 +8,8 @@ const { normalizeHost } = require('./tenants');
 const { safeJson } = require('./state');
 
 const PING_MS = 30000;
+const INSTANT_POWER_VALUES = [0, 1, 2, 10];
+function parseInstantPower(v) { if (v == null || v === '') return null; const n = Number(v); return INSTANT_POWER_VALUES.includes(n) ? n : null; }
 
 function createHub({ db, tenants, state, log = () => {} }) {
   const conns = new Map();          // set_id -> { ws, tenantId, sent: {layout, lineup} }
@@ -74,7 +76,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
     // only pushes real changes from here on.
     try {
       const st = state.build(tenant, set);
-      conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.power_mode || '');
+      conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power);
       conn.sent.lineup = JSON.stringify(st.lineup);
       conn.sent.messages = JSON.stringify(st.messages);
     } catch (e) { log(`ws: state build failed for set ${set.id}: ${e.message}`); }
@@ -97,7 +99,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
         uptime: Number.isFinite(Number(msg.uptime)) && msg.uptime !== null ? Math.floor(Number(msg.uptime)) : null,
         power_mode: msg.power_mode ? String(msg.power_mode).slice(0, 16) : null,
         app_version: msg.app_version ? String(msg.app_version).slice(0, 64) : null,
-        instant_power: msg.instant_power == null ? null : (Number(msg.instant_power) ? 1 : 0),
+        instant_power: parseInstantPower(msg.instant_power),
       });
       conn.alive = true;
     } else if (msg.type === 'ack') {
@@ -137,10 +139,10 @@ function createHub({ db, tenants, state, log = () => {} }) {
       if (!set) continue;
       const st = state.build(tenant, set);
       let touched = false;
-      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.power_mode || '');
+      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power);
       if (force || c.sent.layout !== layoutKey) {
         c.sent.layout = layoutKey;
-        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, power_mode: st.power_mode, instant_power: st.instant_power });
+        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, instant_power: st.instant_power });
         touched = true;
       }
       const lineupKey = JSON.stringify(st.lineup);
@@ -177,4 +179,4 @@ function createHub({ db, tenants, state, log = () => {} }) {
     setCommands(c) { commands = c; }, get size() { return conns.size; } };
 }
 
-module.exports = { createHub };
+module.exports = { createHub, parseInstantPower, INSTANT_POWER_VALUES };

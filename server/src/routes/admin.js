@@ -95,13 +95,14 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
       lineup: state(req).resolveLineup(req.tenant, s) });
   });
   // Instant On is applied through a visible set_property command (queued, delivered, acked,
-  // errors logged) rather than silently by the renderer. desired = 1 for WARM, 0 for NORMAL.
-  const qGroupPower = db.prepare('SELECT power_mode FROM groups WHERE id = ? AND tenant_id = ?');
+  // errors logged). LG instant_power values: 0 off, 1 Instant On with update-on-off, 2 Instant
+  // On, 10 Always On — sent as strings (the TV only accepts string property values).
+  const INSTANT_POWER_VALUES = [0, 1, 2, 10];
+  const qGroupPower = db.prepare('SELECT instant_power FROM groups WHERE id = ? AND tenant_id = ?');
   const qGroupSets = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND group_id = ?');
-  function queueInstantPower(tenant, set, powerMode) {
-    if (!powerMode) return null;
-    const desired = powerMode === 'WARM' ? 1 : 0;
-    return commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: desired }, { dedupe: true });
+  function queueInstantPower(tenant, set, value) {
+    if (value == null) return null;
+    return commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: String(value) }, { dedupe: true });
   }
   r.patch('/sets/:id', (req, res) => {
     const s = loadSet(req, res); if (!s) return;
@@ -133,7 +134,7 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     }
     if ('group_id' in upd && upd.group_id !== s.group_id && upd.group_id) {
       const g = qGroupPower.get(upd.group_id, req.tenant.id);
-      if (g) queueInstantPower(req.tenant, s, g.power_mode);
+      if (g) queueInstantPower(req.tenant, s, g.instant_power);
     }
     hub.refresh(req.tenant.id, { setIds: [s.id] });
     log(`admin ${req.user.username}: set ${s.id} (${s.serial}) updated ${JSON.stringify(upd)}`);
@@ -170,18 +171,18 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     const b = req.body || {};
     const name = 'name' in b ? String(b.name || '').trim().slice(0, 80) : g.name;
     if (!name) return res.status(400).json({ error: 'name required' });
-    let powerMode = g.power_mode;
-    if ('power_mode' in b) {
-      if (b.power_mode != null && !['NORMAL', 'WARM'].includes(b.power_mode)) return res.status(400).json({ error: 'power_mode must be NORMAL, WARM or null' });
-      powerMode = b.power_mode || null;
+    let instantPower = g.instant_power;
+    if ('instant_power' in b) {
+      if (b.instant_power != null && b.instant_power !== '' && !INSTANT_POWER_VALUES.includes(Number(b.instant_power))) return res.status(400).json({ error: 'instant_power must be 0, 1, 2, 10 or null' });
+      instantPower = b.instant_power == null || b.instant_power === '' ? null : Number(b.instant_power);
     }
     try {
-      db.prepare('UPDATE groups SET name = ?, description = ?, power_mode = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, powerMode, g.id);
+      db.prepare('UPDATE groups SET name = ?, description = ?, instant_power = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, instantPower, g.id);
     } catch (e) { return res.status(409).json({ error: 'a group with that name exists' }); }
     let queued = 0;
-    if ('power_mode' in b && powerMode !== g.power_mode && powerMode) {
-      for (const s of qGroupSets.all(req.tenant.id, g.id)) { queueInstantPower(req.tenant, s, powerMode); queued++; }
-      log(`admin ${req.user.username}: group ${g.id} power_mode ${powerMode} → instant_power queued for ${queued} set(s)`);
+    if ('instant_power' in b && instantPower !== g.instant_power && instantPower != null) {
+      for (const s of qGroupSets.all(req.tenant.id, g.id)) { queueInstantPower(req.tenant, s, instantPower); queued++; }
+      log(`admin ${req.user.username}: group ${g.id} instant_power=${instantPower} queued for ${queued} set(s)`);
     }
     if ('layout_id' in b) assignLayout(req, g.id, b.layout_id, res, true);
     hub.refresh(req.tenant.id);

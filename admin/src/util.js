@@ -17,3 +17,5 @@ export function fmtUptime(s) {
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
 }
 export function classNames(...xs) { return xs.filter(Boolean).join(' '); }
+export const INSTANT_POWER_LABELS = { 0: 'Off', 1: 'Instant On + update-on-off', 2: 'Instant On', 10: 'Always On' };
+export function instantPowerLabel(v) { return v == null ? null : (INSTANT_POWER_LABELS[v] || `unknown (${v})`); }

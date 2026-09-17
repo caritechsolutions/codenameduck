@@ -28,7 +28,7 @@ test('layout: banner/digits/popup placement zones, at most one each', () => {
   assert.ok(dup.errors.some((e) => /at most one banner/.test(e)));
 });
 
-test('instant_power: group WARM → state instant_power 1, set reports it via register and heartbeat', async (t) => {
+test('instant_power: group value → state, set reports the real value (0/1/2/10) via register and heartbeat', async (t) => {
   const s = await startServer(); t.after(s.close);
   const { cookie } = await s.login();
   const g = (await s.call('POST', '/api/admin/groups', { cookie, body: { name: 'Lobby' } })).json;
@@ -36,20 +36,23 @@ test('instant_power: group WARM → state instant_power 1, set reports it via re
   assert.equal(reg.json.instant_power, null, 'no group → leave the set alone');
   let row = s.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(reg.json.set_id);
   assert.equal(row.instant_power, 0);
-  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'WARM' } });
+  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 2 } });
   await s.call('PATCH', `/api/admin/sets/${reg.json.set_id}`, { cookie, body: { group_id: g.id } });
   let poll = (await s.call('GET', `/api/tv/poll?set_id=${reg.json.set_id}&token=${reg.json.token}`)).json;
-  assert.equal(poll.instant_power, 1);
-  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'NORMAL' } });
+  assert.equal(poll.instant_power, 2);
+  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 0 } });
   poll = (await s.call('GET', `/api/tv/poll?set_id=${reg.json.set_id}&token=${reg.json.token}`)).json;
   assert.equal(poll.instant_power, 0);
   const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${reg.json.set_id}&token=${reg.json.token}`, { headers: { Host: 'hoteldemo.caritech.net' } });
   await new Promise((res) => ws.once('open', res));
-  ws.send(JSON.stringify({ type: 'hb', instant_power: 1 }));
+  ws.send(JSON.stringify({ type: 'hb', instant_power: '10' }));
   await new Promise((res) => setTimeout(res, 60));
   row = s.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(reg.json.set_id);
-  assert.equal(row.instant_power, 1);
+  assert.equal(row.instant_power, 10, 'real value stored, not coerced to 1');
+  ws.send(JSON.stringify({ type: 'hb', instant_power: 7 }));
+  await new Promise((res) => setTimeout(res, 60));
+  assert.equal(s.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(reg.json.set_id).instant_power, 10, 'unknown values ignored');
   const api = (await s.call('GET', `/api/admin/sets/${reg.json.set_id}`, { cookie })).json;
-  assert.equal(api.instant_power, 1);
+  assert.equal(api.instant_power, 10);
   ws.close();
 });

@@ -194,3 +194,12 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
    logs nothing.
 3. HLS-only lineup power-cycle again: no OSD of either kind (`nosignalimage/set off` still runs
    for the tuner case).
+
+## Phase 3 Part A3 — instant_power values
+
+1. Groups → Instant On (2). Drawer: `set_property instant_power` acks with `value: "2"`; the Power
+   line shows "Instant On (2)". Remote power off → the set goes straight to WARM(WAIT) and comes
+   back instantly on power on.
+2. Switch to "Always On (10)" and "Off (0)": each acks with the matching string and the label
+   follows on the next heartbeat. "Instant On with update-on-off (1)" is there for completeness;
+   expect a slower return from standby.

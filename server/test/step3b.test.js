@@ -30,25 +30,29 @@ test('TV events over WS and HTTP land in the log; last_error surfaces in admin',
   ws.close();
 });
 
-test('group power_mode flows into the TV state and pushes', async (t) => {
+test('group instant_power (0/1/2/10) flows into the TV state and pushes', async (t) => {
   const s = await startServer(); t.after(s.close);
   const { cookie } = await s.login();
   const g = (await s.call('POST', '/api/admin/groups', { cookie, body: { name: 'Lobby' } })).json;
-  assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'HOT' } })).status, 400);
+  assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 3 } })).status, 400);
   const reg = await s.registerSet('S1');
   await s.call('PATCH', `/api/admin/sets/${reg.json.set_id}`, { cookie, body: { group_id: g.id } });
   let poll = (await s.call('GET', `/api/tv/poll?set_id=${reg.json.set_id}&token=${reg.json.token}`)).json;
-  assert.equal(poll.power_mode, null);
+  assert.equal(poll.instant_power, null);
   const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${reg.json.set_id}&token=${reg.json.token}`, { headers: { Host: 'hoteldemo.caritech.net' } });
   const msgs = []; ws.on('message', (d) => msgs.push(JSON.parse(d.toString())));
   await new Promise((res) => ws.once('open', res));
-  const upd = await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'WARM' } });
-  assert.equal(upd.json.power_mode, 'WARM');
+  const upd = await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 2 } });
+  assert.equal(upd.json.instant_power, 2);
   await new Promise((res) => setTimeout(res, 80));
   const layoutMsg = msgs.find((m) => m.type === 'layout');
-  assert.ok(layoutMsg && layoutMsg.power_mode === 'WARM', 'power mode change pushed with the layout');
+  assert.ok(layoutMsg && layoutMsg.instant_power === 2, 'instant_power change pushed with the layout');
+  const cmd = msgs.find((m) => m.type === 'command');
+  assert.ok(cmd && cmd.command.type === 'set_property' && cmd.command.payload.value === '2', 'command carries the value as a string');
   poll = (await s.call('GET', `/api/tv/poll?set_id=${reg.json.set_id}&token=${reg.json.token}`)).json;
-  assert.equal(poll.power_mode, 'WARM');
-  assert.equal((await s.call('GET', '/api/admin/groups', { cookie })).json[0].power_mode, 'WARM');
+  assert.equal(poll.instant_power, 2);
+  assert.equal((await s.call('GET', '/api/admin/groups', { cookie })).json[0].instant_power, 2);
+  for (const v of [10, 1, 0]) assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: v } })).json.instant_power, v);
+  assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: null } })).json.instant_power, null);
   ws.close();
 });

@@ -11,7 +11,7 @@ let browser;
 test.before(async () => { browser = await launchChromium(); });
 test.after(async () => { if (browser) await browser.close(); });
 
-async function boot(t, { channels, fakeOverrides = {}, powerMode = null } = {}) {
+async function boot(t, { channels, fakeOverrides = {}, instantPower = null } = {}) {
   const stack = await startStack(); t.after(stack.close);
   const cookie = await stack.login();
   const defs = channels || [{ number: 9, name: 'Clip', type: 'ip', params: { url: `${stack.base}/fixtures/tiny.webm`, mimeType: 'video/webm' } }, { number: 5, name: 'News', type: 'ip', params: { ip: '239.1.1.5', port: 5000 } }];
@@ -19,7 +19,7 @@ async function boot(t, { channels, fakeOverrides = {}, powerMode = null } = {}) 
   const lu = (await stack.api('POST', '/api/admin/lineups', { name: 'Main', channel_ids: ids }, cookie)).json;
   const l = (await stack.api('POST', '/api/admin/layouts', { name: 'L', json: { schema: 1, canvas: { w: 1920, h: 1080 }, zones: [{ id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675 }], screens: [] } }, cookie)).json;
   const g = (await stack.api('POST', '/api/admin/groups', { name: 'G' }, cookie)).json;
-  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { power_mode: powerMode }, cookie);
+  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { instant_power: instantPower }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/layout`, { layout_id: l.id }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/lineup`, { lineup_id: lu.id }, cookie);
   await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, default_lineup_id: lu.id }, cookie);
@@ -52,27 +52,27 @@ test('renderer registers exactly the shared zone types and a layout with all of 
   await s.page.close();
 });
 
-test('instant_power: sent as a string, read back "1", acked; sticky TV → numeric last resort fails cleanly; refusing TV → failed + tv_error', async (t) => {
+test('instant_power: sent as a string, read back "2", acked; sticky TV → numeric last resort fails cleanly; refusing TV → failed + tv_error', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
   // 1) real LG behaviour: only strings are accepted → one string write, read back "1"
-  let s = await boot(t, { powerMode: 'WARM' });
+  let s = await boot(t, { instantPower: 2 });
   let c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
-  assert.equal(c.status, 'acked', JSON.stringify(c)); assert.equal(c.result.value, '1'); assert.equal(c.result.sent_as, 'string');
+  assert.equal(c.status, 'acked', JSON.stringify(c)); assert.equal(c.result.value, '2'); assert.equal(c.result.sent_as, 'string');
   let f = await s.fake();
   const writes = f.calls.filter((x) => x.uri === 'idcap://configuration/property/set' && x.p.key === 'instant_power');
-  assert.equal(writes.length, 1, 'string first, no numeric attempt needed'); assert.equal(writes[0].p.value, '1');
-  assert.equal(f.props.instant_power, '1');
+  assert.equal(writes.length, 1, 'string first, no numeric attempt needed'); assert.equal(writes[0].p.value, '2');
+  assert.equal(f.props.instant_power, '2');
   await sleep(300);
-  assert.equal(s.stack.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(s.set.id).instant_power, 1, 'heartbeat carried it');
+  assert.equal(s.stack.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(s.set.id).instant_power, 2, 'heartbeat carried it');
   assert.equal(f.calls.filter((x) => x.uri === 'idcap://power/powermode/set').length, 0);
   await s.page.close();
   // 2) TV accepts the string but keeps the old value → numeric retry is refused → failed with both reasons
-  s = await boot(t, { powerMode: 'WARM', fakeOverrides: { __propertyRules: { sticky: ['instant_power'] } } });
+  s = await boot(t, { instantPower: 2, fakeOverrides: { __propertyRules: { sticky: ['instant_power'] } } });
   c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
   assert.equal(c.status, 'failed'); assert.match(c.result.error, /kept instant_power=0/); assert.match(c.result.error, /not string type/);
   await s.page.close();
   // 3) TV refuses outright: failed with the TV's reason, journal line, drawer event
-  s = await boot(t, { powerMode: 'WARM', fakeOverrides: { __propertyRules: { readonly: ['instant_power'] } } });
+  s = await boot(t, { instantPower: 2, fakeOverrides: { __propertyRules: { readonly: ['instant_power'] } } });
   c = await s.waitCmd((x) => x.type === 'set_property' && x.payload.key === 'instant_power');
   assert.equal(c.status, 'failed'); assert.match(c.result.error, /read only/);
   await sleep(200);

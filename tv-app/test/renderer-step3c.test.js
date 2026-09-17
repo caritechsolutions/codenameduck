@@ -15,7 +15,7 @@ function layout(extraZones = [], screens) {
     { id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675 }, { id: 'chlist', type: 'channel_list', x: 80, y: 240, w: 480, h: 560 }, ...extraZones],
     screens: screens || [{ id: 'home', zones: ['tv', 'chlist'] }, { id: 'fullscreen', zones: ['tv'] }, { id: 'info', zones: ['chlist'] }] };
 }
-async function setup(t, { zones, screens, channels, powerMode = null, instantPower = '0' } = {}) {
+async function setup(t, { zones, screens, channels, groupInstantPower = null, instantPower = '0' } = {}) {
   const stack = await startStack(); t.after(stack.close);
   const cookie = await stack.login();
   const defs = channels || [{ number: 5, name: 'News', type: 'ip', params: { ip: '239.1.1.5', port: 5000 } }, { number: 9, name: 'Clip', type: 'ip', params: { url: `${stack.base}/fixtures/tiny.webm`, mimeType: 'video/webm' } }];
@@ -24,7 +24,7 @@ async function setup(t, { zones, screens, channels, powerMode = null, instantPow
   const lu = (await stack.api('POST', '/api/admin/lineups', { name: 'Main', channel_ids: ids }, cookie)).json;
   const l = (await stack.api('POST', '/api/admin/layouts', { name: 'L', json: layout(zones, screens) }, cookie)).json;
   const g = (await stack.api('POST', '/api/admin/groups', { name: 'G' }, cookie)).json;
-  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { power_mode: powerMode }, cookie);
+  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { instant_power: groupInstantPower }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/layout`, { layout_id: l.id }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/lineup`, { lineup_id: lu.id }, cookie);
   await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, default_lineup_id: lu.id }, cookie);
@@ -105,21 +105,23 @@ test('tuner channel: screen switch only calls video/size/set; hidden video → c
 
 test('banner placement zone positions the INFO banner; instant_power written from the group, never powermode/set', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
-  const s = await setup(t, { zones: [{ id: 'bn', type: 'banner', x: 300, y: 40, w: 900, h: 90, style: { fontSize: 40, background: '#123456' } }], powerMode: 'WARM', instantPower: '0' });
+  const s = await setup(t, { zones: [{ id: 'bn', type: 'banner', x: 300, y: 40, w: 900, h: 90, style: { fontSize: 40, background: '#123456' } }], groupInstantPower: 2, instantPower: '0' });
   await s.key(0x1C9);
   const r = await s.page.$eval('.banner.show', (e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, bg: getComputedStyle(e).backgroundColor, fs: getComputedStyle(e).fontSize }; });
   assert.deepEqual([r.x, r.y, r.w], [300, 40, 900]);
   assert.equal(r.bg, 'rgb(18, 52, 86)'); assert.equal(r.fs, '40px');
   // instant_power: property written to 1 and read back; powermode/set never called
-  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '1', null, { timeout: 8000 });
+  await s.page.waitForFunction(() => window.__fake.props.instant_power === '2', null, { timeout: 8000 });
   const f = await s.fake();
   assert.equal(f.calls.filter((c) => c.uri === 'idcap://power/powermode/set').length, 0);
-  assert.ok(f.calls.some((c) => c.uri === 'idcap://configuration/property/set' && c.p.key === 'instant_power' && String(c.p.value) === '1'));
+  assert.ok(f.calls.some((c) => c.uri === 'idcap://configuration/property/set' && c.p.key === 'instant_power' && c.p.value === '2'), 'written as the string "2"');
   await sleep(300);
   const row = s.stack.db.prepare('SELECT instant_power FROM sets WHERE id = ?').get(s.set.id);
-  assert.equal(row.instant_power, 1, 'heartbeat reported the new value');
+  assert.equal(row.instant_power, 2, 'heartbeat reported the new value');
   // group → NORMAL pushes 0
-  await s.stack.api('PATCH', `/api/admin/groups/${s.g.id}`, { power_mode: 'NORMAL' }, s.cookie);
-  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '0', null, { timeout: 8000 });
+  await s.stack.api('PATCH', `/api/admin/groups/${s.g.id}`, { instant_power: 10 }, s.cookie);
+  await s.page.waitForFunction(() => window.__fake.props.instant_power === '10', null, { timeout: 8000 });
+  await s.stack.api('PATCH', `/api/admin/groups/${s.g.id}`, { instant_power: 0 }, s.cookie);
+  await s.page.waitForFunction(() => window.__fake.props.instant_power === '0', null, { timeout: 8000 });
   await s.page.close();
 });

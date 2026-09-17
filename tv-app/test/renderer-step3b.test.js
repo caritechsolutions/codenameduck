@@ -14,7 +14,7 @@ const LAYOUT = { schema: 1, canvas: { w: 1920, h: 1080 }, zones: [
   { id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675 }, { id: 'chlist', type: 'channel_list', x: 80, y: 240, w: 480, h: 560 }],
   screens: [{ id: 'home', zones: ['tv', 'chlist'] }, { id: 'fullscreen', zones: ['tv'] }] };
 
-async function setup(t, { viewport = { width: 1280, height: 720 }, osd = '1280x720', powerMode = null } = {}) {
+async function setup(t, { viewport = { width: 1280, height: 720 }, osd = '1280x720', instantPower = null } = {}) {
   const stack = await startStack(); t.after(stack.close);
   const cookie = await stack.login();
   const c5 = (await stack.api('POST', '/api/admin/channels', { number: 5, name: 'News', type: 'ip', params: { ip: '239.1.1.5', port: 5000 } }, cookie)).json;
@@ -22,7 +22,7 @@ async function setup(t, { viewport = { width: 1280, height: 720 }, osd = '1280x7
   const lu = (await stack.api('POST', '/api/admin/lineups', { name: 'Main', channel_ids: [c5.id, c7.id] }, cookie)).json;
   const l = (await stack.api('POST', '/api/admin/layouts', { name: 'L', json: LAYOUT }, cookie)).json;
   const g = (await stack.api('POST', '/api/admin/groups', { name: 'G' }, cookie)).json;
-  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { power_mode: powerMode }, cookie);
+  await stack.api('PATCH', `/api/admin/groups/${g.id}`, { instant_power: instantPower }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/layout`, { layout_id: l.id }, cookie);
   await stack.api('PUT', `/api/admin/groups/${g.id}/lineup`, { lineup_id: lu.id }, cookie);
   const page = await browser.newPage({ viewport });
@@ -72,10 +72,10 @@ test('1280x720 set: video coords scale to display_resolution; banner, digits and
   await s.page.close();
 });
 
-test('errors and ws lifecycle reach the server log; WARM group writes instant_power, never powermode/set', async (t) => {
+test('errors and ws lifecycle reach the server log; Instant On group writes instant_power="2", never powermode/set', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
-  const s = await setup(t, { viewport: { width: 1920, height: 1080 }, osd: '1920x1080', powerMode: 'WARM' });
-  await s.page.waitForFunction(() => String(window.__fake.props.instant_power) === '1', null, { timeout: 8000 });
+  const s = await setup(t, { viewport: { width: 1920, height: 1080 }, osd: '1920x1080', instantPower: 2 });
+  await s.page.waitForFunction(() => window.__fake.props.instant_power === '2', null, { timeout: 8000 });
   assert.equal((await s.fake()).powerMode, 'NORMAL', 'powermode/set is never called by the renderer');
   assert.equal((await s.fake()).calls.filter((c) => c.uri === 'idcap://power/powermode/set').length, 0);
   // a failing channel change is reported with kind tune

@@ -285,3 +285,11 @@ Decisions already made (do not re-open):
   if `type` ≠ `TV` → `externalinput/set {type:"TV", index:0}` + `tv_input` event. HCAP:
   `hcap.externalinput.getCurrentExternalInput/setCurrentExternalInput` ({type: enum, index}).
 - HCAP no-signal call is `hcap.system.setNoSignalImage({ noSignalImage: false })` (boolean).
+
+### Part A3 — instant_power values (2026-09-17)
+
+- LG `instant_power` has four values: `0` off, `1` Instant On with update-on-off (passes through
+  STANDBY, slow to become ready), `2` Instant On (remote off goes straight to WARM(WAIT)), `10`
+  Always On. `groups.instant_power` (migration 007, old WARM→2/NORMAL→0) is the desired value,
+  NULL = leave the set alone; the admin default choice is Instant On (2). Commands carry the value
+  as a **string**; `sets.instant_power` stores the real reported value (unknown values ignored).

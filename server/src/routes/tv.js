@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const path = require('path');
 const express = require('express');
 const { isFactoryRoom } = require('../state');
+const { parseInstantPower } = require('../ws');
 
 const PROPERTY_FIELDS = ['model', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'mac', 'app_version'];
 const MAX_LEN = 128;
@@ -55,7 +56,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
       app_version: str(b.app_version),
       token: crypto.randomBytes(24).toString('base64url'),
     };
-    const instantPower = b.instant_power == null || b.instant_power === '' ? null : (Number(b.instant_power) ? 1 : 0);
+    const instantPower = parseInstantPower(b.instant_power);
 
     const tenant = req.tenant;
     let set = findSet.get(tenant.id, serial);
@@ -75,10 +76,9 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
     }
     // Same for Instant On: the group decides instant_power; a disagreeing set gets a visible command.
     if (set.group_id && commands) {
-      const g = db.prepare('SELECT power_mode FROM groups WHERE id = ?').get(set.group_id);
-      if (g && g.power_mode) {
-        const desired = g.power_mode === 'WARM' ? 1 : 0;
-        if (instantPower !== desired) commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: desired }, { dedupe: true });
+      const g = db.prepare('SELECT instant_power FROM groups WHERE id = ?').get(set.group_id);
+      if (g && g.instant_power != null && instantPower !== g.instant_power) {
+        commands.queue(tenant, set, 'set_property', { key: 'instant_power', value: String(g.instant_power) }, { dedupe: true });
       }
     }
 

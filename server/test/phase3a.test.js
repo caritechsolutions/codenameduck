@@ -36,15 +36,15 @@ test('instant_power is a visible set_property command: group save, group assignm
   let cmdsA = (await s.call('GET', `/api/admin/sets/${a.json.set_id}/commands`, { cookie })).json;
   assert.equal(cmdsA.length, 0);
   // group save → queued for every set in the group
-  const upd = await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'WARM' } });
+  const upd = await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 2 } });
   assert.equal(upd.json.instant_power_queued, 1);
   cmdsA = (await s.call('GET', `/api/admin/sets/${a.json.set_id}/commands`, { cookie })).json;
-  assert.equal(cmdsA.length, 1); assert.equal(cmdsA[0].type, 'set_property'); assert.deepEqual(cmdsA[0].payload, { key: 'instant_power', value: 1 }); assert.equal(cmdsA[0].status, 'queued');
+  assert.equal(cmdsA.length, 1); assert.equal(cmdsA[0].type, 'set_property'); assert.deepEqual(cmdsA[0].payload, { key: 'instant_power', value: '2' }, 'sent as a string'); assert.equal(cmdsA[0].status, 'queued');
   // assigning another set to the group queues it too; re-saving does not duplicate
   await s.call('PATCH', `/api/admin/sets/${b.json.set_id}`, { cookie, body: { group_id: g.id } });
   let cmdsB = (await s.call('GET', `/api/admin/sets/${b.json.set_id}/commands`, { cookie })).json;
-  assert.equal(cmdsB.length, 1); assert.equal(cmdsB[0].payload.value, 1);
-  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { power_mode: 'WARM' } });
+  assert.equal(cmdsB.length, 1); assert.equal(cmdsB[0].payload.value, '2');
+  await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { instant_power: 2 } });
   assert.equal((await s.call('GET', `/api/admin/sets/${b.json.set_id}/commands`, { cookie })).json.length, 1, 'deduped while queued');
   // the TV picks it up on poll, acks failure → command failed with the TV's reason, visible in the drawer and the journal
   const poll = (await s.call('GET', `/api/tv/poll?set_id=${b.json.set_id}&token=${b.json.token}`)).json;
@@ -57,6 +57,6 @@ test('instant_power is a visible set_property command: group save, group assignm
   await s.call('POST', `/api/tv/ack?set_id=${a.json.set_id}&token=${a.json.token}`, { body: { command_id: cmdsA[0].id, ok: true } });
   const again = await s.registerSet('A', { instant_power: 0 });
   assert.equal(again.json.commands.filter((c) => c.payload.key === 'instant_power').length, 1);
-  const ok = await s.registerSet('A', { instant_power: 1 });
+  const ok = await s.registerSet('A', { instant_power: 2 });
   assert.equal(ok.json.commands.filter((c) => c.payload.key === 'instant_power' && c.status === 'queued').length, 0, 'no new command when the set already agrees');
 });

@@ -1,9 +1,9 @@
 import React from 'react';
-import { PLACEMENT_TYPES, alignZones, distributeZones, moveZoneOrder, updateZones, duplicateZone, removeZone, toggleZoneInScreen, isOnScreen } from './geometry.js';
+import { PLACEMENT_TYPES, alignZones, distributeZones, moveZoneOrder, updateZones, duplicateZone, removeZone, toggleZoneInPage, isOnPage } from './geometry.js';
 
 // Toolbar above the canvas: undo/redo, alignment, distribute, z-order, lock, show/hide on this
 // screen, duplicate, delete. Everything acts on the current selection.
-export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, screenId, canUndo, canRedo, onUndo, onRedo }) {
+export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, pageId, canUndo, canRedo, onUndo, onRedo }) {
   const sel = doc.zones.filter((z) => selectedIds.includes(z.id));
   const n = sel.length;
   const one = n === 1 ? sel[0] : null;
@@ -13,7 +13,7 @@ export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, sc
   const align = (how) => onChange(alignZones(doc, selectedIds, how));
   const order = (dir) => { if (one) onChange(moveZoneOrder(doc, one.id, dir)); };
   const idx = one ? doc.zones.findIndex((z) => z.id === one.id) : -1;
-  const shown = one ? isOnScreen(doc, screenId, one.id) : false;
+  const shown = one ? isOnPage(doc, pageId, one.id) : false;
   return (
     <div className="etoolbar" role="toolbar" aria-label="Editor toolbar">
       <div className="tb-group">
@@ -40,11 +40,11 @@ export default function EditorToolbar({ doc, selectedIds, onChange, onSelect, sc
       </div>
       <div className="tb-group">
         <B label={anyLocked ? '🔓' : '🔒'} title={anyLocked ? 'Unlock' : 'Lock (no move/resize)'} active={anyLocked} on={() => onChange(updateZones(doc, selectedIds, (z) => ({ locked: anyLocked ? undefined : true })))} disabled={!n} />
-        <B label={shown ? '◉' : '◌'} title={one ? (shown ? `Hide on screen “${screenId}”` : `Show on screen “${screenId}”`) : 'Show/hide on this screen (select one zone)'} active={one && !shown}
-          on={() => one && onChange(toggleZoneInScreen(doc, screenId, one.id))} disabled={!one || allPlacement || !screenId} />
+        <B label={shown ? '◉' : '◌'} title={one ? (shown ? `Hide on page “${pageId}”` : `Show on page “${pageId}”`) : 'Show/hide on this page (select one zone)'} active={one && !shown}
+          on={() => one && onChange(toggleZoneInPage(doc, pageId, one.id))} disabled={!one || allPlacement || !pageId} />
       </div>
       <div className="tb-group">
-        <B label="⧉" title="Duplicate (Ctrl+D)" on={() => { const r = duplicateZone(doc, selectedIds, screenId); onChange(r.doc); onSelect(r.zones.map((z) => z.id)); }} disabled={!n} />
+        <B label="⧉" title="Duplicate (Ctrl+D)" on={() => { const r = duplicateZone(doc, selectedIds, pageId); onChange(r.doc); onSelect(r.zones.map((z) => z.id)); }} disabled={!n} />
         <button className="sm tb danger" title="Delete (Del)" aria-label="Delete (Del)" onClick={() => { onChange(removeZone(doc, selectedIds)); onSelect([]); }} disabled={!n}>✕</button>
       </div>
       <span className="muted small" style={{ marginLeft: 'auto' }}>{n === 0 ? 'Nothing selected' : n === 1 ? `${one.id} · ${one.type} · ${one.x},${one.y} ${one.w}×${one.h}` : `${n} selected`}</span>

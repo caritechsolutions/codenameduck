@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "node --test test/renderer.test.js test/renderer-step3.test.js test/renderer-step3b.test.js test/renderer-step3c.test.js test/renderer-step5.test.js test/renderer-phase3a.test.js test/renderer-phase3b1.test.js test/renderer-phase3b2.test.js test/renderer-phase3b3.test.js"
+    "test": "node --test test/renderer.test.js test/renderer-step3.test.js test/renderer-step3b.test.js test/renderer-step3c.test.js test/renderer-step5.test.js test/renderer-phase3a.test.js test/renderer-phase3b1.test.js test/renderer-phase3b2.test.js test/renderer-phase3b3.test.js test/renderer-phase3b2b.test.js"
   },
   "devDependencies": {
     "esbuild": "^0.25.5",

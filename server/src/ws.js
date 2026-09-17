@@ -170,12 +170,12 @@ function createHub({ db, tenants, state, log = () => {} }) {
   }
 
   // Push an unsaved layout to one set (admin "preview on set").
-  function preview(setId, layout) {
+  function preview(setId, layout, page = null) {
     const c = conns.get(setId);
     if (!c) return false;
     const tenant = findTenant.get(c.tenantId);
     const set = findSet.get(setId, c.tenantId);
-    sendJson(c.ws, { type: 'layout', layout, context: state.context(tenant, set), preview: true });
+    sendJson(c.ws, { type: 'layout', layout, context: state.context(tenant, set), preview: true, page: page || undefined });
     c.sent.layout = null; // next refresh restores the real layout
     return true;
   }

@@ -121,8 +121,9 @@ test('layouts: create/validate/update/duplicate/assign/delete and default layout
   const { cookie } = await s.login();
   const created = await s.call('POST', '/api/admin/layouts', { cookie, body: { name: 'Standard room' } });
   assert.equal(created.status, 201);
-  assert.equal(created.json.json.schema, 1);
+  assert.equal(created.json.json.schema, 2);
   assert.ok(created.json.json.zones.length > 0, 'starter layout has zones');
+  assert.ok(created.json.json.pages.length > 0 && created.json.json.home === 'home', 'starter layout has pages');
   const id = created.json.id;
 
   const invalid = await s.call('PUT', `/api/admin/layouts/${id}`, { cookie, body: { json: { schema: 1, zones: [{ id: 'a', type: 'nope' }, { id: 'a', type: 'text' }] } } });

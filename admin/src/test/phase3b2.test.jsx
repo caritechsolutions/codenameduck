@@ -59,13 +59,13 @@ describe('B2 canvas editor', () => {
     for (const t of TEMPLATES) { expect(validateLayout(t.json).errors).toEqual([]); expect(t.json.zones.some((z) => z.type === 'video')).toBe(true); }
   });
 
-  it('palette adds, toolbar aligns, undo/redo, Ctrl-D, screens tabs', async () => {
+  it('palette adds, toolbar aligns, undo/redo, Ctrl-D, page navigator', async () => {
     renderAt('/layouts/1');
     await screen.findByLabelText('Layout canvas');
     fireEvent.click(screen.getByLabelText('add Clock'));
     let d = jsonDoc();
     expect(d.zones.some((z) => z.type === 'clock')).toBe(true);
-    expect(d.screens[0].zones).toContain('clock');
+    expect(d.pages[0].zones).toContain('clock');
     // select welcome, align right → x 1120; undo → 80; redo → 1120
     fireEvent.pointerDown(document.querySelector('[data-zone="welcome"]'), { clientX: 10, clientY: 10, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
@@ -86,20 +86,22 @@ describe('B2 canvas editor', () => {
     d = jsonDoc();
     expect(d.zones.map((z) => z.id)).toContain('text');
     expect(d.zones.find((z) => z.id === 'text')).toMatchObject({ x: 1136, y: 76, text: 'Hi {{room}}, {{guest_first}}' });
-    // screens: tabs switch, + screen adds
-    fireEvent.click(screen.getByRole('tab', { name: /^fullscreen/ }));
+    // pages: the migrated "info" page (was a hidden zone) is in the navigator; selecting it dims home-only zones
+    expect(jsonDoc().pages.map((p) => p.id)).toEqual(['home', 'info']);
+    fireEvent.click(screen.getByLabelText('page Info'));
     expect(document.querySelector('[data-zone="welcome"]').className).toMatch(/dim/);
-    fireEvent.click(screen.getByText('+ screen'));
-    fireEvent.change(screen.getByLabelText('New screen id'), { target: { value: 'dining' } });
-    fireEvent.keyDown(screen.getByLabelText('New screen id'), { key: 'Enter' });
-    expect(screen.getByRole('tab', { name: 'dining' })).toBeTruthy();
-    expect(jsonDoc().screens.map((s) => s.id)).toEqual(['home', 'fullscreen', 'dining']);
-    // save publishes the current doc
+    expect(document.querySelector('[data-zone="tv"]').className).toMatch(/inherited/);   // global zone from home
+    fireEvent.click(screen.getByLabelText('Add page'));
+    fireEvent.change(screen.getByLabelText('New page name'), { target: { value: 'Dining' } });
+    fireEvent.keyDown(screen.getByLabelText('New page name'), { key: 'Enter' });
+    expect(screen.getByLabelText('page Dining')).toBeTruthy();
+    expect(jsonDoc().pages.map((s) => s.id)).toEqual(['home', 'info', 'dining']);
+    // save publishes the current doc (schema 2)
     fireEvent.click(screen.getByText('Save & publish'));
-    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PUT' && p === '/layouts/1' && b.json.screens.length === 3)).toBe(true));
+    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PUT' && p === '/layouts/1' && b.json.pages.length === 3 && b.json.schema === 2)).toBe(true));
   });
 
-  it('typed properties: font picker, bold, variables menu, action picker with pages and screens', async () => {
+  it('typed properties: font picker, bold, variables menu, action picker with pages', async () => {
     renderAt('/layouts/1');
     await screen.findByLabelText('Layout canvas');
     fireEvent.pointerDown(document.querySelector('[data-zone="welcome"]'), { clientX: 10, clientY: 10, pointerId: 1 });
@@ -112,17 +114,17 @@ describe('B2 canvas editor', () => {
     let z = jsonDoc().zones.find((x) => x.id === 'welcome');
     expect(z.style).toMatchObject({ fontFamily: 'Inter', fontWeight: 'bold', fontSize: 64, shadow: 'soft' });
     expect(z.text).toMatch(/\{\{checkout_date\}\}/);
-    // menu action picker lists the hidden page and the other screen
+    // menu action picker lists this layout's pages and the built-ins (no screens, no fullscreen page)
     fireEvent.pointerDown(document.querySelector('[data-zone="menu"]'), { clientX: 10, clientY: 10, pointerId: 1 });
     fireEvent.pointerUp(window, { clientX: 10, clientY: 10 });
     const actions = screen.getAllByLabelText('Action');
     expect(actions.length).toBe(2);
     const opts = Array.from(actions[0].querySelectorAll('option')).map((o) => o.value);
-    expect(opts).toContain('show_page:info'); expect(opts).toContain('show_screen:fullscreen'); expect(opts).toContain('fullscreen_tv');
-    expect(actions[1].value).toBe('show_page:info');
-    fireEvent.change(actions[0], { target: { value: 'show_screen:fullscreen' } });
+    expect(opts).toEqual(['', 'goto_page:home', 'goto_page:info', 'back', 'fullscreen_tv', 'tune', 'launch_app', 'toggle']);
+    expect(actions[1].value).toBe('goto_page:info');
+    fireEvent.change(actions[0], { target: { value: 'goto_page:info' } });
     z = jsonDoc().zones.find((x) => x.id === 'menu');
-    expect(z.items[0]).toEqual({ label: 'Watch TV', action: 'show_screen', screen: 'fullscreen', page: undefined });
+    expect(z.items[0]).toEqual({ label: 'Watch TV', action: 'goto_page', page: 'info' });
   });
 
   it('preview tab draws with the shared renderer code and sample data', async () => {
@@ -136,12 +138,14 @@ describe('B2 canvas editor', () => {
     expect(stage.querySelector('#zone-chlist .chrow.current').textContent).toContain('BBC Two');
     expect(stage.querySelector('#zone-menu .menuitem.focused').textContent).toBe('Watch TV');
     expect(stage.querySelector('#zone-tv .zone-video-placeholder')).toBeTruthy();
-    expect(stage.querySelector('#zone-info')).toBeNull();   // hidden page not shown
-    fireEvent.change(screen.getByLabelText('Preview page'), { target: { value: 'info' } });
+    expect(stage.querySelector('#zone-info')).toBeNull();   // the info page is not the home page
+    fireEvent.click(screen.getByLabelText('page Info'));   // preview follows the navigator
     await waitFor(() => expect(stage.querySelector('#zone-info')).toBeTruthy());
     expect(stage.querySelector('#zone-info h1').textContent).toBe('Hotel Demo info');
-    fireEvent.click(screen.getByRole('tab', { name: /^fullscreen/ }));
-    await waitFor(() => expect(stage.querySelector('#zone-welcome')).toBeNull());
+    expect(stage.querySelector('#zone-tv')).toBeTruthy();   // inherited global zone from home
+    expect(stage.querySelector('#zone-welcome')).toBeNull();
+    fireEvent.click(screen.getByLabelText('Preview full-screen TV'));
+    await waitFor(() => expect(stage.querySelector('#zone-info')).toBeNull());
     expect(stage.querySelector('#zone-tv').style.width).toBe('1920px');
   });
 

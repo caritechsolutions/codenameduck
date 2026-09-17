@@ -277,7 +277,9 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     const s = loadSet(req, res); if (!s) return;
     const { doc, errors } = validateLayout((req.body || {}).json);
     if (errors.length) return res.status(400).json({ error: 'invalid layout', errors });
-    if (!hub.preview(s.id, doc)) return res.status(409).json({ error: 'set is not connected over WebSocket' });
+    const page = (req.body || {}).page;
+    if (page != null && !(doc.pages || []).some((p) => p.id === page)) return res.status(400).json({ error: `unknown page "${page}"` });
+    if (!hub.preview(s.id, doc, page || null)) return res.status(409).json({ error: 'set is not connected over WebSocket' });
     res.json({ ok: true });
   });
   // Queue a command for one set (delivered over WS now, or on the TV's next poll).

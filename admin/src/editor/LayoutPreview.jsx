@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import '../../../shared/zones.css';
 import * as draw from '../../../shared/zone-draw.js';
+import { isFocusable } from '../../../shared/layout-model.js';
 
 // In-editor preview drawn by the renderer's own zone code (shared/zone-draw.js) with fake
 // channel/weather/guest data. What you see here is what the set draws, minus the live picture.
@@ -15,21 +16,22 @@ export function fakeContext(tenant) {
     serial: 'PREVIEW', logo: (tenant && tenant.settings && tenant.settings.logo_url) || '', units: 'metric' };
 }
 
-export default function LayoutPreview({ doc, screenId, width = 960, tenant, openPage = null, apps = null }) {
+export default function LayoutPreview({ doc, pageId, width = 960, tenant, apps = null, fullscreen = false }) {
   const canvas = doc.canvas || { w: 1920, h: 1080 };
   const scale = width / canvas.w;
   const stageRef = useRef(null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
-  const firstMenu = draw.visibleZones(doc, screenId, openPage).find((z) => z.type === 'menu' || z.type === 'app_launcher' || z.type === 'apps');
+  const firstFocus = draw.visibleZones(doc, pageId, { fullscreen }).find((z) => isFocusable(z));
+  const focusKey = firstFocus && firstFocus.id;
   useEffect(() => {
     const stage = stageRef.current; if (!stage) return;
     const ctx = { ...draw.liveContext(fakeContext(tenant), now), __preview: true, __now: now };
-    const env = { lineup: FAKE_LINEUP, currentIndex: 1, focus: firstMenu ? { zone: firstMenu.id, index: 0 } : {}, weather: FAKE_WEATHER, units: 'metric', preview: true,
+    const env = { lineup: FAKE_LINEUP, currentIndex: 1, focus: firstFocus ? { zone: firstFocus.id, index: 0 } : {}, weather: FAKE_WEATHER, units: 'metric', preview: true,
       apps: apps && apps.length ? apps : FAKE_APPS,
-      videoRect: (z) => (screenId === 'fullscreen' ? { x: 0, y: 0, w: canvas.w, h: canvas.h } : { x: z.x, y: z.y, w: z.w, h: z.h }) };
-    draw.renderStage(stage, doc, ctx, env, screenId, openPage);
-  }, [doc, screenId, openPage, tenant, apps, firstMenu && firstMenu.id]); // eslint-disable-line react-hooks/exhaustive-deps
+      videoRect: (z) => (fullscreen ? { x: 0, y: 0, w: canvas.w, h: canvas.h } : { x: z.x, y: z.y, w: z.w, h: z.h }) };
+    draw.renderStage(stage, doc, ctx, env, pageId, { fullscreen });
+  }, [doc, pageId, fullscreen, tenant, apps, focusKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (stageRef.current) draw.tick(stageRef.current, doc, fakeContext(tenant), now); }, [now]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="tvpreview" style={{ width, height: canvas.h * scale }} data-testid="tvpreview">

@@ -65,14 +65,16 @@ test('shared drawers on the set: live variables, fonts + zones.css served, show_
   assert.equal(await s.page.$eval('#zone-menu .menuitem.focused', (e) => e.textContent), 'Channels');
   await s.key(KEY.ENTER);
   await s.page.waitForSelector('#zone-chlist', { timeout: 3000 });
-  assert.equal(await s.page.evaluate(() => window.__cc.state.screen), 'channels');
+  assert.equal(await s.page.evaluate(() => window.__cc.state.page), 'channels');
   assert.equal(await s.page.$('#zone-menu'), null);
   assert.equal(await s.page.$eval('#zone-chlist .chrow', (e) => getComputedStyle(e).display), 'flex');   // zones.css is really loaded
-  // BACK pops the screen stack back home; then the hidden page opens on top
+  // BACK pops the page stack back home; then the (migrated) info page opens
   await s.key(KEY.BACK);
   await s.page.waitForSelector('#zone-menu', { timeout: 3000 });
-  assert.equal(await s.page.evaluate(() => window.__cc.state.screen), 'home');
-  await s.key(KEY.DOWN);   // focus survives the screen switch: Channels → Info
+  assert.equal(await s.page.evaluate(() => window.__cc.state.page), 'home');
+  await s.key(KEY.DOWN);   // a page change resets focus: first DOWN lands on the first item again
+  assert.equal(await s.page.$eval('#zone-menu .menuitem.focused', (e) => e.textContent), 'Channels');
+  await s.key(KEY.DOWN);
   assert.equal(await s.page.$eval('#zone-menu .menuitem.focused', (e) => e.textContent), 'Info');
   await s.key(KEY.ENTER);
   await s.page.waitForSelector('#zone-info', { timeout: 3000 });

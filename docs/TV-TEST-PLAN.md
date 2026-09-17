@@ -288,3 +288,30 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
 6. **Checkout vs app sign-ins (document, don't fix yet).** Sign in to Netflix on the set, then
    Sets → drawer → Checkout. Reopen Netflix: is it signed out? Report yes/no. If no, we look at
    `tv/checkout/request` parameters and `application/uninstall` + `install` (Part C).
+
+## Phase 3 Part B2b — pages and element actions
+
+1. **Migration.** After `install.sh` the journal says `layouts: upgraded N layout(s) to schema 2
+   (pages)`. Open each existing layout: the old screens are pages in the left navigator, the
+   `fullscreen` screen is gone (it is the "Full-screen TV" action now), each old hidden HTML zone
+   is its own page, menu items read "Go to page …". Every set still boots to the same picture.
+2. **Pages on the set.** Classic template: OK on "Hotel information" opens that page with the
+   TV, clock and logo still there (inherited from home); BACK returns to home; BACK on home →
+   full-screen TV (layout setting), BACK again → home. PORTAL toggles full-screen TV from any page.
+3. **Buttons + spatial navigation.** Welcome template: the two buttons at the bottom. Arrow keys
+   move the highlight between them and any other focusable zone (menus, app tiles, text/image
+   zones with an action) by direction — LEFT/RIGHT along a row, UP/DOWN across rows. OK on
+   "Watch TV" goes full screen; OK on "Hotel information" opens the page. The focus ring uses the
+   layout's colour/width/radius (Layout panel) and the button's own focused background.
+4. **Element actions.** Give a text zone an action (e.g. "Tune to channel 5"): it becomes
+   focusable on the set and OK tunes. "Show / hide a zone" toggles the target zone on the current
+   page; a redraw keeps the highlight where it was.
+5. **Global zones.** On a page with "inherit global zones from home" on, the home page's TV,
+   channel list, clock and OSD positions show; switch it off in the Layout panel → they vanish on
+   that page (the picture pauses while hidden, resumes on return — no retune).
+6. **Preview on set.** With the "Dining" page selected in the navigator, "Preview" pushes the
+   whole layout and the set opens on Dining; BACK goes to home.
+7. **Editor.** Navigator: add, rename (✎ or double-click), duplicate (copies the page's own
+   zones, shares the globals), ★ set as home, drag to reorder, delete (not home; zones only that
+   page used are removed). The Preview tab follows the selected page and has a "full-screen TV"
+   checkbox. Actions that point at a deleted page show the red "!" badge on the zone.

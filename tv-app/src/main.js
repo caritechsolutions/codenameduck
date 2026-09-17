@@ -7,6 +7,7 @@ import * as tv from './platform.js';
 import { KEY, KEY_NAME } from './platform.js';
 import ZONE_TYPES from '../../shared/zone-types.json';
 import * as draw from '../../shared/zone-draw.js';
+import * as model from '../../shared/layout-model.js';
 
 var APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number', 'instant_power'];
@@ -24,7 +25,7 @@ var pendingEvents = [];        // events queued while the WebSocket is down
 var MAX_PENDING_EVENTS = 50;
 var state = {
   api: null, props: {}, setId: null, token: null, context: {}, layout: null, layoutJson: null,
-  screen: null, screenStack: [], lineup: [], channel: null, lastChannel: null, tuning: null, videoRect: null,
+  page: null, pageStack: [], fullscreen: false, toggled: {}, lineup: [], channel: null, lastChannel: null, tuning: null, videoRect: null,
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
@@ -93,7 +94,7 @@ function toOsdRect(z) {
 }
 // The "fullscreen" screen shows the video zone over the whole canvas.
 function effectiveVideoRect(z) {
-  if (state.screen === 'fullscreen') { var c = state.canvasSize || { w: 1920, h: 1080 }; return { x: 0, y: 0, w: c.w, h: c.h }; }
+  if (state.fullscreen) { var c = state.canvasSize || { w: 1920, h: 1080 }; return { x: 0, y: 0, w: c.w, h: c.h }; }
   return { x: z.x, y: z.y, w: z.w, h: z.h };
 }
 
@@ -128,17 +129,11 @@ function refreshWeather() {
 }
 function tickClocks() { draw.tick(stage, state.layout, state.context, new Date()); }
 
-function currentScreen() {
-  var l = state.layout || {};
-  var screens = l.screens || [];
-  if (!screens.length) return null;
-  for (var i = 0; i < screens.length; i++) if (screens[i].id === state.screen) return screens[i];
-  return screens[0];
-}
+function viewOpts() { return { toggled: state.toggled, fullscreen: state.fullscreen }; }
+// {zoneId: true} for everything drawn on the current page (inherited globals included).
 function visibleZoneIds() {
-  var scr = currentScreen();
-  if (!scr) return null;
-  var m = {}; (scr.zones || []).forEach(function (id) { m[id] = true; });
+  var m = {};
+  draw.visibleZones(state.layout || {}, state.page, viewOpts()).forEach(function (z) { m[z.id] = true; });
   return m;
 }
 
@@ -153,7 +148,7 @@ function render() {
   // The video zone is tracked even when the current screen hides it, so placeVideo() can pause
   // instead of tearing the channel down.
   var videoZone = (layout.zones || []).filter(function (z) { return z.type === 'video'; })[0] || null;
-  var skipped = draw.renderStage(stage, layout, textContext(), drawEnv(), state.screen, state.openPage);
+  var skipped = draw.renderStage(stage, layout, textContext(), drawEnv(), state.page, viewOpts());
   if (skipped.length) log('zone types not supported: ' + skipped.join(', '));
   if (state.clockTimer) clearInterval(state.clockTimer);
   state.clockTimer = setInterval(tickClocks, 1000);
@@ -239,8 +234,7 @@ function placeVideo(z) {
     if (videoHost) videoHost.style.display = 'none';
     return;
   }
-  var vis = visibleZoneIds();
-  var shown = !vis || !!vis[z.id];
+  var shown = !!visibleZoneIds()[z.id];
   if (!shown) {
     if (videoHost) videoHost.style.display = 'none';
     if (state.channel && !state.videoPaused) {
@@ -428,68 +422,104 @@ function commitDigits() {
   if (ch) tuneTo(ch); else banner(n + '  — no such channel');
 }
 
-// ---------------------------------------------------------------- screens / actions
-function showScreen(id, push) {
-  var scr = (state.layout && state.layout.screens || []).filter(function (s) { return s.id === id; })[0];
-  if (!scr) return false;
-  if (push && state.screen && state.screen !== id) state.screenStack.push(state.screen);
-  state.screen = id; state.openPage = null;
+// ---------------------------------------------------------------- pages / actions
+function homeId() { return model.homePageId(state.layout || {}); }
+function gotoPage(id, push) {
+  if (!model.pageById(state.layout || {}, id)) return false;
+  if (push && state.page && state.page !== id) state.pageStack.push(state.page);
+  state.page = id; state.fullscreen = false; state.toggled = {};
+  state.focus = { zone: null, index: 0 };
   render();
+  sendEvent('page', { page: id });
   return true;
 }
+function setFullscreen(on) {
+  state.fullscreen = !!on;
+  state.focus = { zone: null, index: 0 };
+  render();
+}
+// Run an action: a v2 object {type, page|number|app_id|zone}, a flat menu item, or a legacy
+// name (show_page, close_page, toggle_menu, …) — actionOf() normalises all of them.
 function doAction(action, arg) {
-  switch (action) {
-    case 'toggle_menu': {
-      var scrs = (state.layout && state.layout.screens) || [];
-      if (scrs.length < 2) return;
-      var home = scrs[0].id, alt = (scrs.filter(function (s) { return s.id === 'fullscreen'; })[0] || scrs[1]).id;
-      showScreen(state.screen === home ? alt : home, false);
+  var a = model.actionOf(typeof action === 'string' && arg && typeof arg === 'object' ? Object.assign({}, arg, { action: action }) : action, homeId());
+  if (!a) return;
+  switch (a.type) {
+    case 'goto_page': gotoPage(a.page, true); break;
+    case 'back':
+      if (state.fullscreen) setFullscreen(false);
+      else if (state.pageStack.length) gotoPage(state.pageStack.pop(), false);
+      else if (state.page !== homeId()) gotoPage(homeId(), false);
+      else if ((state.layout && state.layout.back_on_home) === 'fullscreen_tv') setFullscreen(true);
       break;
-    }
-    case 'fullscreen_tv': if (!showScreen('fullscreen', true)) { state.openPage = null; render(); } break;
-    case 'home': showScreen(((state.layout.screens || [])[0] || {}).id, false); state.screenStack = []; break;
-    case 'show_page': state.openPage = arg && (arg.page || arg); render(); break;
-    case 'show_screen': if (arg && (arg.screen || typeof arg === 'string')) showScreen(arg.screen || arg, true); break;
-    case 'close_page':
-      if (state.openPage) { state.openPage = null; render(); }
-      else if (state.screenStack.length) showScreen(state.screenStack.pop(), false);
-      break;
+    case 'fullscreen_tv': setFullscreen(!state.fullscreen); break;
+    case 'toggle': if (a.zone) { state.toggled[a.zone] = !state.toggled[a.zone]; render(); } break;
     case 'launch_app':
-      if (arg && arg.app_id) {
-        sendEvent('app', { kind: 'launch', app_id: arg.app_id });
-        tv.launchApp(arg.app_id, arg.params, arg.noSplash).then(null, function (e) { reportError('launch', 'launch ' + arg.app_id + ' failed: ' + e.message, { app_id: arg.app_id }); });
+      if (a.app_id) {
+        sendEvent('app', { kind: 'launch', app_id: a.app_id });
+        tv.launchApp(a.app_id, arg && arg.params, arg && arg.noSplash).then(null, function (e) { reportError('launch', 'launch ' + a.app_id + ' failed: ' + e.message, { app_id: a.app_id }); });
       }
       break;
-    case 'tune': if (arg && arg.number != null) { var c = findChannel(arg.number); if (c) tuneTo(c); } break;
+    case 'tune': if (a.number != null) { var c = findChannel(a.number); if (c) tuneTo(c); } break;
     case 'reload': window.location.reload(); break;
-    default: log('unknown action ' + action);
+    default: log('unknown action ' + a.type);
   }
 }
-function menuZones() {
-  var vis = visibleZoneIds();
-  return ((state.layout && state.layout.zones) || []).filter(function (z) { return (z.type === 'menu' || z.type === 'app_launcher' || z.type === 'apps') && (!vis || vis[z.id] || state.openPage === z.id) && !(z.hidden && state.openPage !== z.id); });
+
+// ---------------------------------------------------------------- focus (spatial navigation)
+// Targets = every focusable thing on the page: menu items / app tiles (item-level) and
+// text/image/button zones that carry an action. Rects are read from the DOM in canvas px.
+function stageRect(el) {
+  var sr = stage.getBoundingClientRect(), r = el.getBoundingClientRect(), k = state.scale || 1;
+  return { x: (r.left - sr.left) / k, y: (r.top - sr.top) / k, w: r.width / k, h: r.height / k };
 }
-function menuItems(z) { return z.type === 'apps' ? draw.appItemsOf(z, drawEnv()) : draw.menuItemsOf(z); }
-function moveFocus(delta) {
-  var menus = menuZones();
-  if (!menus.length) return false;
-  var z = menus.filter(function (m) { return m.id === state.focus.zone; })[0] || menus[0];
-  var items = menuItems(z);
-  if (!items.length) return false;
-  // First press on an unfocused menu lands on its first item; after that, move.
-  var index = state.focus.zone === z.id ? (state.focus.index + delta + items.length) % items.length : 0;
-  state.focus = { zone: z.id, index: index };
-  var e = document.getElementById('zone-' + z.id);
-  if (e) renderMenu(e, z);
+function focusTargets() {
+  var out = [];
+  draw.visibleZones(state.layout || {}, state.page, viewOpts()).forEach(function (z) {
+    if (!model.isFocusable(z)) return;
+    var e = document.getElementById('zone-' + z.id);
+    if (!e) return;
+    if (model.NAV_ZONE_TYPES.indexOf(z.type) >= 0) {
+      var items = e.querySelectorAll('.menuitem, .apptile');
+      for (var i = 0; i < items.length; i++) out.push({ zone: z.id, index: i, rect: stageRect(items[i]), zoneObj: z });
+    } else out.push({ zone: z.id, index: 0, rect: stageRect(e), zoneObj: z });
+  });
+  return out;
+}
+function focusedTarget(targets) {
+  for (var i = 0; i < targets.length; i++) if (targets[i].zone === state.focus.zone && targets[i].index === state.focus.index) return i;
+  return -1;
+}
+function setFocus(t) {
+  var prev = state.focus;
+  state.focus = { zone: t.zone, index: t.index };
+  var ids = {}; if (prev && prev.zone) ids[prev.zone] = true; ids[t.zone] = true;
+  var layout = state.layout || {};
+  for (var id in ids) {
+    var z = (layout.zones || []).filter(function (x) { return x.id === id; })[0];
+    var e = document.getElementById('zone-' + id);
+    if (!z || !e) continue;
+    if (model.NAV_ZONE_TYPES.indexOf(z.type) >= 0) renderMenu(e, z);
+    else { var fresh = draw.zoneElement(z, textContext(), drawEnv()); if (fresh) e.parentNode.replaceChild(fresh, e); }
+  }
+}
+function moveFocusDir(dir) {
+  var targets = focusTargets();
+  if (!targets.length) return false;
+  var cur = focusedTarget(targets);
+  var next = model.spatialNext(targets.map(function (t) { return t.rect; }), cur, dir);
+  if (next < 0) return true;   // nothing that way: swallow the key, keep the highlight
+  setFocus(targets[next]);
   return true;
 }
+function moveFocus(delta) { return moveFocusDir(delta < 0 ? 'up' : 'down'); }   // kept for tests / legacy callers
+function menuItems(z) { return z.type === 'apps' ? draw.appItemsOf(z, drawEnv()) : draw.menuItemsOf(z); }
 function activateFocus() {
-  var menus = menuZones();
-  var z = menus.filter(function (m) { return m.id === state.focus.zone; })[0];
-  if (!z) { if (menus.length) { state.focus = { zone: menus[0].id, index: 0 }; render(); } return false; }
-  var it = menuItems(z)[state.focus.index];
-  if (!it) return false;
-  doAction(it.action, it);
+  var targets = focusTargets();
+  var i = focusedTarget(targets);
+  if (i < 0) { if (targets.length) setFocus(targets[model.spatialNext(targets.map(function (t) { return t.rect; }), -1, 'down')]); return targets.length > 0; }
+  var t = targets[i];
+  if (model.NAV_ZONE_TYPES.indexOf(t.zoneObj.type) >= 0) { var it = menuItems(t.zoneObj)[t.index]; if (!it) return false; doAction(it); }
+  else doAction(t.zoneObj.action);
   return true;
 }
 
@@ -507,25 +537,27 @@ function onKeyDown(ev) {
   else if (name === 'LAST_CH') { var prev = findChannel(state.prevChannel); if (prev) tuneTo(prev); }
   else if (name === 'INFO') { if (state.channel) channelBanner(); else handled = false; }
   else if (keys[name]) doAction(keys[name]);
-  else if (name === 'PORTAL' || name === 'GUIDE') doAction('toggle_menu');
-  else if (name === 'BACK' || name === 'EXIT') doAction('close_page');
-  else if (name === 'UP' || name === 'LEFT') handled = moveFocus(-1);
-  else if (name === 'DOWN' || name === 'RIGHT') handled = moveFocus(1);
+  else if (name === 'PORTAL' || name === 'GUIDE') doAction({ type: 'fullscreen_tv' });
+  else if (name === 'BACK' || name === 'EXIT') doAction({ type: 'back' });
+  else if (name === 'UP') handled = moveFocusDir('up');
+  else if (name === 'DOWN') handled = moveFocusDir('down');
+  else if (name === 'LEFT') handled = moveFocusDir('left');
+  else if (name === 'RIGHT') handled = moveFocusDir('right');
   else if (name === 'ENTER') handled = activateFocus();
   else handled = false;
   if (handled) { ev.preventDefault(); ev.stopPropagation(); }
 }
 
 // ---------------------------------------------------------------- state from server
-function applyLayout(layout, ctx, force) {
+function applyLayout(layout, ctx, force, openOn) {
   if (ctx) state.context = ctx;
   var json = JSON.stringify(layout) + JSON.stringify(state.context);
   if (!force && json === state.layoutJson) return;
   state.layoutJson = json;
-  state.layout = layout || {};
-  var screens = state.layout.screens || [];
-  if (!screens.some(function (s) { return s.id === state.screen; })) { state.screen = screens.length ? screens[0].id : null; state.screenStack = []; }
-  state.openPage = null;
+  state.layout = model.upgradeLayout(layout || {}) || {};
+  if (openOn && model.pageById(state.layout, openOn)) { state.page = openOn; state.pageStack = []; state.fullscreen = false; }
+  else if (!model.pageById(state.layout, state.page)) { state.page = model.homePageId(state.layout); state.pageStack = []; state.fullscreen = false; }
+  state.toggled = {};
   render();
   log('layout: ' + (state.layout.name || '?') + (state.layout.version ? ' v' + state.layout.version : ''));
 }
@@ -737,7 +769,7 @@ function onWsMessage(msg) {
     case 'hello': break;
     case 'layout':
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
-      applyLayout(msg.layout, msg.context || state.context, !!msg.preview);
+      applyLayout(msg.layout, msg.context || state.context, !!msg.preview, msg.page || null);
       if (msg.preview) log('preview layout from admin');
       break;
     case 'lineup': applyLineup(msg.lineup); break;
@@ -865,4 +897,4 @@ document.addEventListener('DOMContentLoaded', boot);
   if (missing.length || extra.length) log('ERROR zone types out of sync: missing ' + missing.join(',') + ' extra ' + extra.join(','));
 })();
 // Test hook (read-only view of state).
-window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render, zoneTypes: Object.keys(RENDERERS) };
+window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render, doAction: doAction, focusTargets: focusTargets, zoneTypes: Object.keys(RENDERERS) };

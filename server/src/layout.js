@@ -1,11 +1,16 @@
 'use strict';
 // Layout resolution for a set: per-set override → group assignment → tenant default →
-// built-in "unassigned" screen. Layout documents follow docs/PLATFORM.md "Layout document (v1)".
+// built-in "unassigned" screen. Layout documents are v2 (pages, shared/layout-model.js); v1
+// documents (screens) are upgraded on read and on save.
+const path = require('path');
+const { loadEsm } = require('./esm');
+const model = loadEsm(path.resolve(__dirname, '../../shared/layout-model.js'));
+const { upgradeLayout, validatePages, actionOf } = model;
 
 function unassignedLayout({ tenant, set }) {
   const serial = set.serial || '—';
-  return {
-    schema: 1,
+  return upgradeLayout({
+    schema: 2,
     name: 'Unassigned',
     builtin: 'unassigned',
     canvas: { w: 1920, h: 1080, background: '#0b1a2a', backgroundImage: null },
@@ -33,14 +38,15 @@ function unassignedLayout({ tenant, set }) {
         style: { fontSize: 28, color: '#5c7a8f' } },
     ],
     keys: {},
-    screens: [{ id: 'home', zones: ['title', 'hint', 'serial_label', 'serial', 'model', 'room', 'clock', 'brand'] }],
-  };
+    pages: [{ id: 'home', name: 'Home', zones: ['title', 'hint', 'serial_label', 'serial', 'model', 'room', 'clock', 'brand'], inherit: true }],
+    home: 'home',
+  });
 }
 
 function parseLayoutRow(row) {
   if (!row) return null;
   try {
-    const doc = JSON.parse(row.json);
+    const doc = upgradeLayout(JSON.parse(row.json));
     doc.id = row.id;
     doc.version = row.version;
     doc.updated_at = row.updated_at;
@@ -72,8 +78,9 @@ function validateLayout(input) {
   let doc = input;
   if (typeof doc === 'string') { try { doc = JSON.parse(doc); } catch (e) { return { doc: null, errors: ['invalid JSON: ' + e.message] }; } }
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { doc: null, errors: ['layout must be an object'] };
-  const out = { schema: 1 };
-  if (doc.schema !== undefined && doc.schema !== 1) errors.push('schema must be 1');
+  if (doc.schema !== undefined && doc.schema !== 1 && doc.schema !== 2) errors.push('schema must be 1 or 2');
+  doc = upgradeLayout(doc);
+  const out = { schema: 2 };
   out.name = typeof doc.name === 'string' && doc.name.trim() ? doc.name.trim().slice(0, 80) : 'Untitled';
   const c = doc.canvas && typeof doc.canvas === 'object' ? doc.canvas : {};
   out.canvas = {
@@ -97,19 +104,30 @@ function validateLayout(input) {
     for (const t of ['banner', 'digits', 'popup']) if (out.zones.filter((z) => z.type === t).length > 1) errors.push(`at most one ${t} zone`);
   }
   out.keys = doc.keys && typeof doc.keys === 'object' ? doc.keys : {};
-  if (doc.screens !== undefined) {
-    if (!Array.isArray(doc.screens)) errors.push('screens must be an array');
-    else {
-      const zoneIds = new Set(out.zones.map((z) => z.id));
-      out.screens = doc.screens.map((s, i) => {
-        const id = s && typeof s.id === 'string' ? s.id : `screen${i + 1}`;
-        const zones = Array.isArray(s && s.zones) ? s.zones.filter((zid) => typeof zid === 'string') : [];
-        for (const zid of zones) if (!zoneIds.has(zid)) errors.push(`screen "${id}" references unknown zone "${zid}"`);
-        return { id, zones };
-      });
-    }
-  } else out.screens = [];
+  out.pages = doc.pages;
+  out.home = doc.home;
+  out.focus = doc.focus;
+  out.back_on_home = doc.back_on_home;
+  for (const e of validatePages(out)) errors.push(e);
   return { doc: out, errors };
+}
+
+// One-time rewrite of stored v1 layouts to v2 (idempotent; runs at startup).
+function migrateStoredLayouts(db, log = () => {}) {
+  const rows = db.prepare('SELECT id, name, json FROM layouts').all();
+  let n = 0;
+  const upd = db.prepare('UPDATE layouts SET json = ? WHERE id = ?');
+  for (const r of rows) {
+    let doc; try { doc = JSON.parse(r.json); } catch { continue; }
+    if (doc && doc.schema === 2 && Array.isArray(doc.pages)) continue;
+    const { doc: v2 } = validateLayout(doc);
+    if (!v2) continue;
+    v2.name = doc.name || r.name;
+    upd.run(JSON.stringify(v2), r.id);
+    n++;
+  }
+  if (n) log(`layouts: upgraded ${n} layout(s) to schema 2 (pages)`);
+  return n;
 }
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
@@ -125,4 +143,4 @@ function templateLayout(id, name = 'New layout') {
 }
 function starterLayout(name = 'New layout') { return templateLayout('classic', name); }
 
-module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, templateLayout, layoutTemplates, ZONE_TYPES };
+module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, templateLayout, layoutTemplates, migrateStoredLayouts, upgradeLayout, actionOf, model, ZONE_TYPES };

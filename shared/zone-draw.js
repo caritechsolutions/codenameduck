@@ -7,6 +7,8 @@
 //   env  — live data: lineup[], currentIndex, focus {zone,index}, weather, units,
 //          videoRect(zone) → {x,y,w,h} (renderer: fullscreen expands it), preview (bool)
 
+import { visibleZoneList, isFocusable, actionOf, NAV_ZONE_TYPES, DEFAULT_FOCUS, homePageId } from './layout-model.js';
+
 export var VARIABLES = ['hotel', 'room', 'guest', 'guest_first', 'checkout_date', 'time', 'date'];
 export var PLACEMENT_TYPES = ['banner', 'digits', 'popup'];
 
@@ -113,6 +115,7 @@ export function drawChannelList(e, z, ctx, env) {
 export function menuItemsOf(z) {
   return z.type === 'app_launcher' ? (z.apps || []).map(function (a) { return { label: a.label, action: 'launch_app', app_id: a.app_id }; }) : (z.items || []);
 }
+export { actionOf };
 export function drawMenu(e, z, ctx, env) {
   e.setAttribute('data-menu', '1');
   clear(e);
@@ -173,6 +176,13 @@ export function drawApps(e, z, ctx, env) {
   if (!items.length) e.appendChild(el('div', 'zone-placeholder', env && env.preview ? 'apps (enable some for the group)' : ''));
 }
 
+// Button: label + optional icon, focusable; focusStyle applies while focused.
+export function drawButton(e, z, ctx) {
+  e.classList.add('zone-button');
+  if (z.icon) { var img = document.createElement('img'); img.className = 'btn-icon'; img.src = substitute(z.icon, ctx); img.alt = ''; e.appendChild(img); }
+  e.appendChild(el('span', 'btn-label', substitute(z.label || z.text || '', ctx)));
+}
+
 export var DRAWERS = {
   text: drawText,
   image: drawImage,
@@ -186,26 +196,12 @@ export var DRAWERS = {
   html: drawHtml,
   weather: drawWeather,
   app_launcher: drawMenu,
-  apps: drawApps
+  apps: drawApps,
+  button: drawButton
 };
 
-// The zones a screen shows, in stacking order. openPage = id of a hidden zone opened by a
-// menu action (drawn on top of the screen).
-export function visibleZones(layout, screenId, openPage) {
-  layout = layout || {};
-  var screens = layout.screens || [];
-  var scr = null;
-  for (var i = 0; i < screens.length; i++) if (screens[i].id === screenId) scr = screens[i];
-  if (!scr && screens.length) scr = screens[0];
-  var vis = null;
-  if (scr) { vis = {}; (scr.zones || []).forEach(function (id) { vis[id] = true; }); }
-  return (layout.zones || []).filter(function (z) {
-    if (PLACEMENT_TYPES.indexOf(z.type) >= 0) return false;
-    if (z.hidden && openPage !== z.id) return false;
-    if (vis && !vis[z.id] && openPage !== z.id) return false;
-    return true;
-  });
-}
+// The zones a page shows, in stacking order (shared/layout-model.js). opts: {toggled, fullscreen}.
+export function visibleZones(layout, pageId, opts) { return visibleZoneList(layout, pageId, opts); }
 
 // One positioned, styled, drawn .zone element (or null for an unknown type).
 export function zoneElement(z, ctx, env) {
@@ -217,20 +213,32 @@ export function zoneElement(z, ctx, env) {
   e.style.left = (z.x || 0) + 'px'; e.style.top = (z.y || 0) + 'px';
   e.style.width = (z.w || 0) + 'px'; e.style.height = (z.h || 0) + 'px';
   applyStyle(e, z.style);
+  if (isFocusable(z) && NAV_ZONE_TYPES.indexOf(z.type) < 0) {
+    e.classList.add('focusable');
+    var f = (env && env.focus) || {};
+    if (f.zone === z.id) { e.classList.add('focused'); if (z.focusStyle) applyStyle(e, z.focusStyle); }
+  }
   fn(e, z, ctx, env);
   return e;
 }
 
 // Draw a whole screen into `stage` (removes previous .zone children). Returns the zone types
 // it could not draw.
-export function renderStage(stage, layout, ctx, env, screenId, openPage) {
+export function applyFocusRing(stage, layout) {
+  var f = (layout && layout.focus) || DEFAULT_FOCUS;
+  stage.style.setProperty('--focus-color', f.color || DEFAULT_FOCUS.color);
+  stage.style.setProperty('--focus-width', (f.width != null ? f.width : DEFAULT_FOCUS.width) + 'px');
+  stage.style.setProperty('--focus-radius', (f.radius != null ? f.radius : DEFAULT_FOCUS.radius) + 'px');
+}
+export function renderStage(stage, layout, ctx, env, pageId, opts) {
   layout = layout || {};
   var canvas = layout.canvas || {};
   stage.style.background = canvas.background || '#000';
   stage.style.backgroundImage = canvas.backgroundImage ? 'url(' + canvas.backgroundImage + ')' : 'none';
+  applyFocusRing(stage, layout);
   Array.prototype.slice.call(stage.querySelectorAll('.zone')).forEach(function (n) { stage.removeChild(n); });
   var skipped = [];
-  visibleZones(layout, screenId, openPage).forEach(function (z) {
+  visibleZones(layout, pageId || homePageId(layout), opts).forEach(function (z) {
     var e = zoneElement(z, ctx, env);
     if (!e) { skipped.push(z.type); return; }
     stage.appendChild(e);

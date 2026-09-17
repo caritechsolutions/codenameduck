@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { HANDLES, PLACEMENT_TYPES, dragRect, resizeRect, guideSnap, zoneLabel, snap } from './geometry.js';
+import { HANDLES, PLACEMENT_TYPES, dragRect, resizeRect, guideSnap, zoneLabel, snap, pageZoneIds, isOnPage } from './geometry.js';
 
 // 16:9 canvas that draws the layout's zones as boxes you can select (shift/ctrl for several),
 // drag and resize. Snap to an 8 px grid plus smart guides to other zones and the canvas
 // (Alt = free). Palette items are dropped onto it. Coordinates convert between screen pixels
 // and canvas pixels via `scale`.
-export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect, screenId, width = 960, errorsByZone = {}, onDropType }) {
+export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect, pageId, width = 960, errorsByZone = {}, onDropType }) {
   const canvas = doc.canvas || { w: 1920, h: 1080 };
   const scale = width / canvas.w;
   const height = canvas.h * scale;
@@ -14,8 +14,9 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
   const [ghost, setGhost] = useState(null);      // { [id]: rect } during a drag
   const [guides, setGuides] = useState([]);
   const [over, setOver] = useState(false);
-  const screen = (doc.screens || []).find((s) => s.id === screenId);
-  const inScreen = (z) => !screen || PLACEMENT_TYPES.includes(z.type) || screen.zones.includes(z.id);
+  const shownIds = new Set(pageZoneIds(doc, pageId));
+  const inScreen = (z) => PLACEMENT_TYPES.includes(z.type) || shownIds.has(z.id);
+  const inherited = (z) => shownIds.has(z.id) && !isOnPage(doc, pageId, z.id);
   const isSel = (id) => selectedIds.includes(id);
 
   const onPointerDown = (e, z, mode) => {
@@ -101,7 +102,7 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
           const dim = !inScreen(z);
           const errs = errorsByZone[z.id];
           return (
-            <div key={z.id} className={`czone t-${z.type}${sel ? ' sel' : ''}${dim ? ' dim' : ''}${z.hidden ? ' hidden-zone' : ''}${z.locked ? ' locked' : ''}${errs ? ' err' : ''}`}
+            <div key={z.id} className={`czone t-${z.type}${sel ? ' sel' : ''}${dim ? ' dim' : ''}${inherited(z) ? ' inherited' : ''}${z.locked ? ' locked' : ''}${errs ? ' err' : ''}${z.action ? ' has-action' : ''}`}
               style={{ left: px(r.x), top: px(r.y), width: px(r.w), height: px(r.h),
                 fontSize: Math.max(9, ((z.style && z.style.fontSize) || 28) * scale), color: (z.style && z.style.color) || '#fff',
                 fontFamily: z.style && z.style.fontFamily ? `"${z.style.fontFamily}", sans-serif` : undefined,
@@ -109,7 +110,7 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
                 background: z.type === 'video' ? undefined : (z.style && z.style.background) || undefined, textAlign: (z.style && z.style.align) || 'left',
                 borderRadius: z.style && z.style.borderRadius ? px(z.style.borderRadius) : undefined }}
               onPointerDown={(e) => onPointerDown(e, z, 'move')} data-zone={z.id} data-selected={sel ? '1' : '0'} title={`${z.id} (${z.type}) ${z.x},${z.y} ${z.w}×${z.h}${z.locked ? ' · locked' : ''}`}>
-              <div className="czone-label"><span className="czone-id">{z.id}</span> {zoneLabel(z)}{z.locked ? ' 🔒' : ''}</div>
+              <div className="czone-label"><span className="czone-id">{z.id}</span> {zoneLabel(z)}{z.locked ? ' 🔒' : ''}{inherited(z) ? ' · from home' : ''}{z.action ? ' ⚡' : ''}</div>
               {errs && <div className="czone-err" title={errs.join('\n')} aria-label={`errors on ${z.id}`}>!</div>}
               {z.type === 'video' && <div className="tvglyph">▶ live TV</div>}
               {z.type === 'channel_list' && <div className="chglyph">{[5, 7, 9, 12].map((n) => <div key={n} className={n === 7 ? 'cur' : ''} style={n === 7 && z.style && z.style.highlight ? { background: z.style.highlight, color: '#1a1a1a' } : undefined}>{n} Channel {n}</div>)}</div>}
@@ -121,6 +122,7 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
               {z.type === 'image' && (z.src && !/\{\{/.test(z.src) ? <img src={z.src} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : <div className="tvglyph">{z.src ? 'logo' : 'image'}</div>)}
               {z.type === 'weather' && <div className="ctext">☀ 24°</div>}
               {z.type === 'html' && <div className="ctext muted">HTML</div>}
+              {z.type === 'button' && <div className="tvglyph" style={{ fontSize: '1em' }}>{z.label || 'Button'}</div>}
               {z.type === 'banner' && <div className="ctext">5  News   20:15</div>}
               {z.type === 'digits' && <div className="ctext" style={{ textAlign: 'right' }}>12</div>}
               {z.type === 'popup' && <div className="ctext" style={{ textAlign: 'center' }}>Your taxi is waiting at reception</div>}
@@ -131,7 +133,7 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
         {guides.map((g, i) => <div key={i} className={'guide guide-' + g.axis} style={g.axis === 'x' ? { left: px(g.pos) } : { top: px(g.pos) }} />)}
         {ghost && drag && ghost[drag.primary] && <div className="coords">{Math.round(ghost[drag.primary].x)}, {Math.round(ghost[drag.primary].y)} · {Math.round(ghost[drag.primary].w)} × {Math.round(ghost[drag.primary].h)}</div>}
       </div>
-      <div className="muted small" style={{ marginTop: 6 }}>Drag to move (8 px grid + guides; Alt = free), handles to resize (Shift keeps aspect). Shift-click selects several. Arrows nudge, Shift+arrows by 8. Ctrl-D duplicates, Delete removes. Dimmed zones are not on this screen.</div>
+      <div className="muted small" style={{ marginTop: 6 }}>Drag to move (8 px grid + guides; Alt = free), handles to resize (Shift keeps aspect). Shift-click selects several. Arrows nudge, Shift+arrows by 8. Ctrl-D duplicates, Delete removes. Dimmed zones are not on this page; “from home” = global zone inherited from the home page.</div>
     </div>
   );
 }

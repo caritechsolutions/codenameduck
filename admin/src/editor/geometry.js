@@ -2,6 +2,8 @@
 import SHARED_ZONE_TYPES from '../../../shared/zone-types.json';
 import FONTS_JSON from '../../../shared/fonts.json';
 import { VARIABLES as SHARED_VARIABLES } from '../../../shared/zone-draw.js';
+import { upgradeLayout, actionOf, actionFlat, pageZoneIds, homePageId, pageById, GLOBAL_TYPES, ACTION_TYPES } from '../../../shared/layout-model.js';
+export { upgradeLayout, actionOf, actionFlat, pageZoneIds, homePageId, pageById, GLOBAL_TYPES };
 
 export const GRID = 8;
 export const MIN_SIZE = 40;
@@ -9,15 +11,13 @@ export const GUIDE_THRESHOLD = 6;     // canvas px within which an edge snaps to
 export const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 export const ZONE_TYPES = SHARED_ZONE_TYPES;   // shared/zone-types.json
 export const PLACEMENT_TYPES = ['banner', 'digits', 'popup'];   // position/style of the renderer's OSD elements
-export const ACTIONS = ['toggle_menu', 'fullscreen_tv', 'home', 'show_page', 'show_screen', 'close_page', 'launch_app', 'tune', 'reload'];
+export const ACTIONS = ACTION_TYPES;   // none, goto_page, back, fullscreen_tv, tune, launch_app, toggle
 export const BUILTIN_ACTIONS = [
-  { value: 'fullscreen_tv', label: 'Watch TV (full screen)' },
-  { value: 'toggle_menu', label: 'Toggle home / full screen' },
-  { value: 'home', label: 'Go to home screen' },
-  { value: 'close_page', label: 'Close page / go back' },
+  { value: 'back', label: 'Back (previous page)' },
+  { value: 'fullscreen_tv', label: 'Full-screen TV (toggle)' },
   { value: 'tune', label: 'Tune to channel…' },
   { value: 'launch_app', label: 'Launch app…' },
-  { value: 'reload', label: 'Reload the TV app' },
+  { value: 'toggle', label: 'Show / hide a zone…' },
 ];
 export const KEY_NAMES = ['PORTAL', 'GUIDE', 'BACK', 'EXIT', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'MENU', 'INFO'];
 export const VARIABLES = SHARED_VARIABLES;
@@ -29,7 +29,7 @@ export const PALETTE = [
   { group: 'Text', items: [['text', 'Text']] },
   { group: 'Image', items: [['image', 'Image']] },
   { group: 'Channel list', items: [['channel_list', 'Channel list']] },
-  { group: 'Menu', items: [['menu', 'Menu'], ['apps', 'Apps (tiles)'], ['app_launcher', 'App launcher (fixed ids)']] },
+  { group: 'Menu & buttons', items: [['button', 'Button'], ['menu', 'Menu'], ['apps', 'Apps (tiles)'], ['app_launcher', 'App launcher (fixed ids)']] },
   { group: 'Clock', items: [['clock', 'Clock']] },
   { group: 'Weather', items: [['weather', 'Weather']] },
   { group: 'OSD placement', items: [['banner', 'INFO banner'], ['digits', 'Channel digits'], ['popup', 'Message popup']] },
@@ -152,7 +152,8 @@ export function zoneLabel(z) {
     case 'app_launcher': return `app launcher (${(z.apps || []).length})`;
     case 'apps': return `apps enabled for the group${z.layout === 'grid' ? ' · grid' : ''}`;
     case 'weather': return 'weather';
-    case 'html': return 'html page';
+    case 'html': return 'html';
+    case 'button': return (z.label || 'button');
     case 'banner': return 'INFO banner position';
     case 'digits': return 'digit OSD position';
     case 'popup': return 'message popup position';
@@ -181,7 +182,8 @@ export function newZone(doc, type, at) {
     case 'clock': z = { ...base, w: 260, h: 70, format: 'HH:mm', style: { fontSize: 44, color: '#ffffff', align: 'right' } }; break;
     case 'channel_list': z = { ...base, w: 480, h: 560, style: { fontSize: 28, color: '#ffffff', background: 'rgba(0,0,0,0.35)', highlight: '#ffd166' } }; break;
     case 'menu': z = { ...base, w: 420, h: 300, items: [{ label: 'Watch TV', action: 'fullscreen_tv' }, { label: 'Hotel info', action: 'show_page', page: 'info' }], style: { fontSize: 36, color: '#ffffff', highlight: '#ffd166' } }; break;
-    case 'html': z = { ...base, w: 1200, h: 700, hidden: true, html: '<h1>Hotel information</h1><p>Breakfast 7–10 in the lobby.</p>', style: { fontSize: 32, color: '#ffffff', background: 'rgba(0,0,0,0.85)', padding: 40 } }; break;
+    case 'button': z = { ...base, w: 360, h: 90, label: 'Button', action: { type: 'fullscreen_tv' }, style: { fontSize: 32, color: '#ffffff', background: 'rgba(255,255,255,0.14)', borderRadius: 14 }, focusStyle: { background: '#ffd166', color: '#1a1a1a' } }; break;
+    case 'html': z = { ...base, w: 1200, h: 700, html: '<h1>Hotel information</h1><p>Breakfast 7–10 in the lobby.</p>', style: { fontSize: 32, color: '#ffffff', background: 'rgba(0,0,0,0.85)', padding: 40 } }; break;
     case 'weather': z = { ...base, w: 360, h: 120, units: 'metric', style: { fontSize: 36, color: '#ffffff' } }; break;
     case 'apps': z = { ...base, x: 80, y: 760, w: 1760, h: 220, layout: 'row', style: { fontSize: 30, color: '#ffffff', highlight: '#ffd166', tileSize: 200 } }; break;
     case 'app_launcher': z = { ...base, w: 600, h: 200, apps: [{ label: 'Netflix', app_id: 'netflix' }, { label: 'YouTube', app_id: 'youtube.leanback.v4' }], style: { fontSize: 32, color: '#ffffff', highlight: '#ffd166' } }; break;
@@ -203,29 +205,30 @@ export function updateZones(doc, ids, fn) {
 }
 export function renameZone(doc, id, newId) {
   if (!newId || newId === id || doc.zones.some((z) => z.id === newId)) return doc;
+  const fixAction = (a) => (a && a.type === 'toggle' && a.zone === id ? { ...a, zone: newId } : a);
   return { ...doc,
-    zones: doc.zones.map((z) => (z.id === id ? { ...z, id: newId } : z)),
-    screens: (doc.screens || []).map((s) => ({ ...s, zones: s.zones.map((zid) => (zid === id ? newId : zid)) })) };
+    zones: doc.zones.map((z) => ({ ...z, id: z.id === id ? newId : z.id, action: z.action ? fixAction(z.action) : z.action, items: z.items ? z.items.map((it) => (it.zone === id ? { ...it, zone: newId } : it)) : z.items })),
+    pages: pagesOf(doc).map((p) => ({ ...p, zones: p.zones.map((zid) => (zid === id ? newId : zid)) })) };
 }
 export function removeZone(doc, idOrIds) {
   const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
-  return { ...doc, zones: doc.zones.filter((z) => !ids.includes(z.id)), screens: (doc.screens || []).map((s) => ({ ...s, zones: s.zones.filter((zid) => !ids.includes(zid)) })) };
+  return { ...doc, zones: doc.zones.filter((z) => !ids.includes(z.id)), pages: pagesOf(doc).map((p) => ({ ...p, zones: p.zones.filter((zid) => !ids.includes(zid)) })) };
 }
-export function addZone(doc, type, screenId, at) {
+export function addZone(doc, type, pageId, at) {
   const z = newZone(doc, type, at);
-  const placement = PLACEMENT_TYPES.includes(type);   // overlays are global, not per screen
-  const screens = (doc.screens || []).map((s) => (s.id === screenId && !z.hidden && !placement ? { ...s, zones: [...s.zones, z.id] } : s));
-  return { doc: { ...doc, zones: [...doc.zones, z], screens }, zone: z };
+  const placement = PLACEMENT_TYPES.includes(type);   // overlays are global, not per page
+  const pages = pagesOf(doc).map((p) => (p.id === pageId && !placement ? { ...p, zones: [...p.zones, z.id] } : p));
+  return { doc: { ...doc, zones: [...doc.zones, z], pages }, zone: z };
 }
-export function duplicateZone(doc, idOrIds, screenId) {
+export function duplicateZone(doc, idOrIds, pageId) {
   const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
   let out = doc; const zones = [];
   for (const id of ids) {
     const src = out.zones.find((z) => z.id === id);
     if (!src) continue;
     const copy = { ...JSON.parse(JSON.stringify(src)), id: nextZoneId(out, src.type), x: src.x + GRID * 2, y: src.y + GRID * 2, locked: undefined };
-    const screens = (out.screens || []).map((s) => (s.id === screenId && !PLACEMENT_TYPES.includes(src.type) && !src.hidden ? { ...s, zones: [...s.zones, copy.id] } : s));
-    out = { ...out, zones: [...out.zones, copy], screens };
+    const pages = pagesOf(out).map((p) => (p.id === pageId && !PLACEMENT_TYPES.includes(src.type) ? { ...p, zones: [...p.zones, copy.id] } : p));
+    out = { ...out, zones: [...out.zones, copy], pages };
     zones.push(copy);
   }
   return { doc: out, zone: zones[0], zones };
@@ -238,27 +241,83 @@ export function moveZoneOrder(doc, id, dir) { // dir: -1 back, +1 front, 'front'
   const zones = doc.zones.slice(); const [z] = zones.splice(i, 1); zones.splice(j, 0, z);
   return { ...doc, zones };
 }
-export function toggleZoneInScreen(doc, screenId, zoneId) {
-  return { ...doc, screens: (doc.screens || []).map((s) => {
-    if (s.id !== screenId) return s;
-    return s.zones.includes(zoneId) ? { ...s, zones: s.zones.filter((z) => z !== zoneId) } : { ...s, zones: [...s.zones, zoneId] };
+
+// ---- pages
+export const pagesOf = (doc) => (doc && Array.isArray(doc.pages) ? doc.pages : []);
+export function isOnPage(doc, pageId, zoneId) {   // explicitly listed (not inherited)
+  const p = pageById(doc, pageId);
+  return !!p && p.zones.includes(zoneId);
+}
+export function isInheritedOnPage(doc, pageId, zoneId) {
+  return !isOnPage(doc, pageId, zoneId) && pageZoneIds(doc, pageId).includes(zoneId);
+}
+export function toggleZoneInPage(doc, pageId, zoneId) {
+  return { ...doc, pages: pagesOf(doc).map((p) => {
+    if (p.id !== pageId) return p;
+    return p.zones.includes(zoneId) ? { ...p, zones: p.zones.filter((z) => z !== zoneId) } : { ...p, zones: [...p.zones, zoneId] };
   }) };
 }
-export function isOnScreen(doc, screenId, zoneId) {
-  const s = (doc.screens || []).find((x) => x.id === screenId);
-  return !s || s.zones.includes(zoneId);
+export function pageSlug(name, doc) {
+  const base = String(name || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'page';
+  const ids = new Set(pagesOf(doc).map((p) => p.id));
+  if (!ids.has(base)) return base;
+  let i = 2; while (ids.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
 }
-export function addScreen(doc, id) {
-  if (!id || (doc.screens || []).some((s) => s.id === id)) return doc;
-  return { ...doc, screens: [...(doc.screens || []), { id, zones: [] }] };
+export function addPage(doc, name) {
+  const n = String(name || '').trim() || 'New page';
+  const page = { id: pageSlug(n, doc), name: n, zones: [], inherit: true };
+  return { doc: { ...doc, pages: [...pagesOf(doc), page] }, page };
 }
-export function removeScreen(doc, id) {
-  return { ...doc, screens: (doc.screens || []).filter((s) => s.id !== id) };
+export function renamePage(doc, id, name) {
+  const n = String(name || '').trim();
+  if (!n) return doc;
+  return { ...doc, pages: pagesOf(doc).map((p) => (p.id === id ? { ...p, name: n } : p)) };
 }
-export function ensureScreens(doc) {
-  if (doc.screens && doc.screens.length) return doc;
-  return { ...doc, screens: [{ id: 'home', zones: doc.zones.filter((z) => !z.hidden).map((z) => z.id) }] };
+export function setPageInherit(doc, id, inherit) {
+  return { ...doc, pages: pagesOf(doc).map((p) => (p.id === id ? { ...p, inherit: !!inherit } : p)) };
 }
+export function setHomePage(doc, id) {
+  if (!pageById(doc, id)) return doc;
+  return { ...doc, home: id };
+}
+export function movePage(doc, id, toIndex) {
+  const pages = pagesOf(doc).slice();
+  const i = pages.findIndex((p) => p.id === id);
+  if (i < 0 || toIndex < 0 || toIndex >= pages.length || toIndex === i) return doc;
+  const [p] = pages.splice(i, 1); pages.splice(toIndex, 0, p);
+  return { ...doc, pages };
+}
+// Deleting a page removes the zones only it used (global zones stay: they belong to home).
+export function removePage(doc, id) {
+  const pages = pagesOf(doc);
+  if (pages.length < 2 || id === homePageId(doc)) return doc;
+  const page = pageById(doc, id);
+  const rest = pages.filter((p) => p.id !== id);
+  const usedElsewhere = new Set(rest.flatMap((p) => p.zones));
+  const orphan = new Set(((page && page.zones) || []).filter((zid) => !usedElsewhere.has(zid) && !GLOBAL_TYPES.includes((doc.zones.find((z) => z.id === zid) || {}).type)));
+  const zones = doc.zones.filter((z) => !orphan.has(z.id)).map((z) => (z.action && z.action.type === 'goto_page' && z.action.page === id ? { ...z, action: undefined } : z));
+  return { ...doc, pages: rest, zones, home: doc.home === id ? rest[0].id : doc.home };
+}
+// Duplicate: global zones stay shared, everything else is deep-copied with new ids.
+export function duplicatePage(doc, id) {
+  const page = pageById(doc, id);
+  if (!page) return { doc };
+  let out = doc;
+  const copyIds = [];
+  for (const zid of page.zones) {
+    const z = out.zones.find((x) => x.id === zid);
+    if (!z) continue;
+    if (GLOBAL_TYPES.includes(z.type)) { copyIds.push(zid); continue; }
+    const copy = { ...JSON.parse(JSON.stringify(z)), id: nextZoneId(out, z.type) };
+    out = { ...out, zones: [...out.zones, copy] };
+    copyIds.push(copy.id);
+  }
+  const np = { id: pageSlug(page.name + ' copy', out), name: page.name + ' copy', zones: copyIds, inherit: page.inherit !== false };
+  const pages = pagesOf(out).slice(); pages.splice(pages.findIndex((p) => p.id === id) + 1, 0, np);
+  return { doc: { ...out, pages }, page: np };
+}
+export function ensurePages(doc) { return upgradeLayout(doc); }
 
 // Validation messages → { zoneId: [messages] } for inline badges (messages mention zone "id").
 export function errorsByZone(errors) {
@@ -267,24 +326,27 @@ export function errorsByZone(errors) {
   return out;
 }
 
-// Menu item action ↔ picker value ("show_page:info", "show_screen:channels", "fullscreen_tv").
-export function actionValue(it) {
-  if (!it || !it.action) return '';
-  if (it.action === 'show_page') return `show_page:${it.page || ''}`;
-  if (it.action === 'show_screen') return `show_screen:${it.screen || ''}`;
-  return it.action;
+// Action ↔ picker value ("goto_page:info", "fullscreen_tv", "" = none). Works for a zone's
+// nested action object and for a flat menu item.
+export function actionValue(x) {
+  const a = actionOf(x);
+  if (!a) return '';
+  if (a.type === 'goto_page') return `goto_page:${a.page || ''}`;
+  return a.type;
 }
-export function parseActionValue(v) {
-  if (!v) return { action: undefined, page: undefined, screen: undefined };
-  const [action, arg] = v.split(':');
-  if (action === 'show_page') return { action, page: arg || undefined, screen: undefined };
-  if (action === 'show_screen') return { action, screen: arg || undefined, page: undefined };
-  return { action, page: undefined, screen: undefined };
+export function parseActionValue(v, prev) {
+  if (!v) return null;
+  const [type, arg] = v.split(':');
+  const p = actionOf(prev) || {};
+  if (type === 'goto_page') return { type, page: arg || '' };
+  if (type === 'tune') return { type, number: p.type === 'tune' ? p.number : null };
+  if (type === 'launch_app') return { type, app_id: p.type === 'launch_app' ? p.app_id : '' };
+  if (type === 'toggle') return { type, zone: p.type === 'toggle' ? p.zone : '' };
+  return { type };
 }
-// Choices for the action picker: pages (hidden zones), screens (except the current one) and built-ins.
+// Choices for the action picker: this layout's pages, then built-ins.
 export function actionChoices(doc, apps = []) {
-  const pages = (doc.zones || []).filter((z) => z.hidden).map((z) => ({ value: `show_page:${z.id}`, label: `Open page “${z.id}”` }));
-  const screens = (doc.screens || []).slice(1).map((s) => ({ value: `show_screen:${s.id}`, label: `Go to screen “${s.id}”` }));
+  const pages = pagesOf(doc).map((p) => ({ value: `goto_page:${p.id}`, label: `Go to page “${p.name || p.id}”` }));
   const appItems = apps.map((a) => ({ value: `launch_app:${a.id}`, label: `Launch ${a.name || a.id}` }));
-  return { pages, screens, apps: appItems, builtins: BUILTIN_ACTIONS };
+  return { pages, apps: appItems, builtins: BUILTIN_ACTIONS };
 }

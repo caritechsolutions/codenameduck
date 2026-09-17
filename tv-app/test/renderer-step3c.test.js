@@ -85,11 +85,11 @@ test('tuner channel: screen switch only calls video/size/set; hidden video → c
   assert.equal(f.calls.filter((c) => c.uri === 'idcap://tv/channel/change/request').length, changes, 'no retune on fullscreen');
   assert.equal(await s.calls('idcap://tv/channel/stop'), 0);
   // GUIDE → toggles too; use the layout key map: switch to the "info" screen (no video zone) via a menu? use screen id directly
-  await s.page.evaluate(() => { window.__cc.state.screen = 'info'; window.__cc.render(); });
+  await s.page.evaluate(() => window.__cc.doAction({ type: 'goto_page', page: 'info' }));   // the "info" page has no video zone
   await sleep(300);
   assert.equal(await s.calls('idcap://tv/channel/stop'), 1, 'hidden video leaves the multicast group');
   assert.equal(await s.page.$eval('#videohost', (e) => e.style.display), 'none');
-  await s.page.evaluate(() => { window.__cc.state.screen = 'home'; window.__cc.render(); });
+  await s.page.evaluate(() => window.__cc.doAction({ type: 'back' }));
   await sleep(300);
   assert.equal(await s.calls('idcap://tv/channel/replay'), 1, 'shown again → replay, not retune');
   assert.equal(await s.calls('idcap://tv/channel/change/request'), changes);

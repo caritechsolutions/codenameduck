@@ -15,12 +15,14 @@ test('layout templates: four starters that validate, exposed to the admin, used 
     const r = validateLayout(tpl.json);
     assert.deepEqual(r.errors, [], `${tpl.id}: ${r.errors.join('; ')}`);
     assert.ok(tpl.json.zones.some((z) => z.type === 'video'), `${tpl.id} has a video zone`);
-    assert.ok(tpl.json.screens.some((s) => s.id === 'fullscreen'), `${tpl.id} has a fullscreen screen`);
-    // every screen references known zones and every menu action targets something that exists
-    const ids = new Set(tpl.json.zones.map((z) => z.id));
-    for (const z of tpl.json.zones.filter((x) => x.type === 'menu')) for (const it of z.items) {
-      if (it.action === 'show_page') assert.ok(ids.has(it.page) && tpl.json.zones.find((x) => x.id === it.page).hidden, `${tpl.id}: page ${it.page}`);
-      if (it.action === 'show_screen') assert.ok(tpl.json.screens.some((s) => s.id === it.screen), `${tpl.id}: screen ${it.screen}`);
+    assert.equal(tpl.json.schema, 2, `${tpl.id} is a v2 (pages) document`);
+    assert.ok(tpl.json.pages.some((p) => p.id === tpl.json.home), `${tpl.id} has its home page`);
+    assert.ok(!tpl.json.pages.some((p) => p.id === 'fullscreen'), `${tpl.id}: full-screen TV is an action, not a page`);
+    assert.ok(tpl.json.pages.every((p) => p.name), `${tpl.id}: every page is named`);
+    // every menu / button action targets a page that exists
+    for (const z of tpl.json.zones) {
+      const acts = [...(z.items || []), ...(z.action ? [z.action] : [])];
+      for (const it of acts) { const type = it.type || it.action; if (type === 'goto_page') assert.ok(tpl.json.pages.some((p) => p.id === it.page), `${tpl.id}: page ${it.page}`); }
     }
     // fonts used by templates are bundled
     for (const z of tpl.json.zones) if (z.style && z.style.fontFamily) assert.ok(FONTS.some((f) => f.family === z.style.fontFamily), `${tpl.id}: font ${z.style.fontFamily}`);

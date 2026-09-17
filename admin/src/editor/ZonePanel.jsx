@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Field } from '../components/ui.jsx';
 import MediaPicker from '../components/MediaPicker.jsx';
-import { ZONE_TYPES, PLACEMENT_TYPES, KEY_NAMES, VARIABLES, FONTS, SHADOW_OPTIONS, TYPE_LABELS, BUILTIN_ACTIONS, updateZone, renameZone, addScreen, removeScreen, actionValue, parseActionValue, actionChoices } from './geometry.js';
+import { ZONE_TYPES, PLACEMENT_TYPES, KEY_NAMES, VARIABLES, FONTS, SHADOW_OPTIONS, TYPE_LABELS, GLOBAL_TYPES, updateZone, renameZone, actionValue, parseActionValue, actionChoices, actionOf, actionFlat, pagesOf, pageById, homePageId, isOnPage, isInheritedOnPage, toggleZoneInPage, renamePage, setPageInherit } from './geometry.js';
 
 const num = (v) => (v === '' || v == null ? undefined : Number(v));
 
@@ -53,9 +53,32 @@ export function StyleFields({ style = {}, onChange, fields }) {
   );
 }
 
+// Action picker: none | pages | back | fullscreen_tv | tune(channel) | launch_app(app) | toggle(zone).
+// `value` is any action spelling (nested object or flat menu item); onChange gets a v2 object or null.
+export function ActionPicker({ doc, value, onChange, apps = [], zones = [], label = 'Action', exclude = [] }) {
+  const a = actionOf(value);
+  const ch = actionChoices(doc, apps);
+  const v = actionValue(value);
+  const set = (patch) => onChange({ ...(a || {}), ...patch });
+  return (
+    <div className="action-picker">
+      <select value={v} onChange={(e) => onChange(parseActionValue(e.target.value, a))} aria-label={label}>
+        <option value="">— none —</option>
+        {ch.pages.length > 0 && <optgroup label="Pages">{ch.pages.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>}
+        <optgroup label="Built-in">{ch.builtins.filter((b) => !exclude.includes(b.value)).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>
+      </select>
+      {a && a.type === 'tune' && <input type="number" min="1" value={a.number ?? ''} placeholder="channel number" onChange={(e) => set({ number: num(e.target.value) ?? null })} aria-label="channel #" />}
+      {a && a.type === 'launch_app' && (apps.length
+        ? <select value={a.app_id || ''} onChange={(e) => set({ app_id: e.target.value })} aria-label="app id"><option value="">— app —</option>{apps.map((x) => <option key={x.id} value={x.id}>{x.name || x.id}</option>)}{a.app_id && !apps.some((x) => x.id === a.app_id) && <option value={a.app_id}>{a.app_id}</option>}</select>
+        : <input value={a.app_id || ''} placeholder="app id (e.g. netflix)" onChange={(e) => set({ app_id: e.target.value })} aria-label="app id" />)}
+      {a && a.type === 'toggle' && <select value={a.zone || ''} onChange={(e) => set({ zone: e.target.value })} aria-label="toggle zone"><option value="">— zone —</option>{zones.map((z) => <option key={z.id} value={z.id}>{z.id} ({z.type})</option>)}</select>}
+    </div>
+  );
+}
+
 // Text editor with a small toolbar: bold/italic/size/colour live in the style; variables are
 // inserted at the caret; Enter is a line break (the renderer keeps white-space).
-function TextEditor({ zone, setZ, setStyle }) {
+function TextEditor({ zone, setZ }) {
   const ref = useRef(null);
   const insert = (v) => {
     const el = ref.current; const text = zone.text || '';
@@ -76,10 +99,10 @@ function TextEditor({ zone, setZ, setStyle }) {
   );
 }
 
-// Menu items with the action picker (pages, screens, apps, built-ins).
+// Menu items: label + the same action picker as zones (stored flat on the item).
 function MenuItems({ doc, items, onChange, apps = [] }) {
-  const ch = actionChoices(doc, apps);
   const set = (i, patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it)));
+  const setAction = (i, a) => { const flat = actionFlat(a); onChange(items.map((it, j) => (j === i ? { label: it.label, ...Object.fromEntries(Object.entries(flat).filter(([, v]) => v !== undefined)) } : it))); };
   const move = (i, d) => { const a = items.slice(); const [x] = a.splice(i, 1); a.splice(i + d, 0, x); onChange(a); };
   return (
     <div>
@@ -87,18 +110,11 @@ function MenuItems({ doc, items, onChange, apps = [] }) {
         <div key={i} className="menu-item-row">
           <div className="list-row">
             <input value={it.label || ''} placeholder="Label" onChange={(e) => set(i, { label: e.target.value })} aria-label="Label" />
-            <select value={actionValue(it).startsWith('launch_app') ? 'launch_app' : actionValue(it)} onChange={(e) => set(i, parseActionValue(e.target.value))} aria-label="Action">
-              <option value="">— action —</option>
-              {ch.pages.length > 0 && <optgroup label="Pages">{ch.pages.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>}
-              {ch.screens.length > 0 && <optgroup label="Screens">{ch.screens.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>}
-              <optgroup label="Built-in">{BUILTIN_ACTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</optgroup>
-            </select>
             <button className="sm ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="up">↑</button>
             <button className="sm ghost" disabled={i === items.length - 1} onClick={() => move(i, 1)} aria-label="down">↓</button>
             <button className="sm ghost danger" onClick={() => onChange(items.filter((_, j) => j !== i))} aria-label="remove">✕</button>
           </div>
-          {it.action === 'launch_app' && <div className="list-row">{apps.length ? <select value={it.app_id || ''} onChange={(e) => set(i, { app_id: e.target.value })} aria-label="app id"><option value="">— app —</option>{apps.map((a) => <option key={a.id} value={a.id}>{a.name || a.id}</option>)}</select> : <input value={it.app_id || ''} placeholder="app id (e.g. netflix)" onChange={(e) => set(i, { app_id: e.target.value })} aria-label="app id" />}</div>}
-          {it.action === 'tune' && <div className="list-row"><input type="number" value={it.number ?? ''} placeholder="channel number" onChange={(e) => set(i, { number: num(e.target.value) })} aria-label="channel #" /></div>}
+          <ActionPicker doc={doc} value={it} onChange={(a) => setAction(i, a)} apps={apps} zones={doc.zones} label="Action" />
         </div>))}
       <button className="sm" onClick={() => onChange([...items, { label: 'New item' }])}>Add item</button>
     </div>
@@ -122,50 +138,60 @@ function ListEditor({ items, onChange, fields, addLabel }) {
   );
 }
 
-export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, screenId, setScreenId, errorsByZone = {}, apps = [] }) {
+export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, pageId, errorsByZone = {}, apps = [] }) {
   const zone = selectedIds.length === 1 ? doc.zones.find((z) => z.id === selectedIds[0]) : null;
-  const [newScreen, setNewScreen] = useState('');
-  const [picker, setPicker] = useState(null);   // 'image' | 'background'
+  const [picker, setPicker] = useState(null);   // 'image' | 'background' | 'icon'
   const canvas = doc.canvas || {};
   const setZ = (patch) => onChange(updateZone(doc, zone.id, patch));
   const setStyle = (style) => setZ({ style });
+  const page = pageById(doc, pageId);
+  const home = homePageId(doc);
 
   if (selectedIds.length > 1) {
     return <div className="panel"><h3>{selectedIds.length} zones selected</h3><p className="muted small">Use the toolbar to align, distribute, lock or delete them. Select one zone to edit its properties.</p></div>;
   }
   if (!zone) {
+    const focus = doc.focus || {};
+    const setFocus = (patch) => onChange({ ...doc, focus: { ...focus, ...patch } });
     return (
       <div className="panel">
-        <h3>Canvas</h3>
+        <h3>Layout</h3>
         <div className="grid2">
           <Field label="Background"><ColorInput label="Canvas background" value={canvas.background || '#0b1a2a'} onChange={(v) => onChange({ ...doc, canvas: { ...canvas, background: v } })} /></Field>
           <Field label="Background image"><div className="inline"><input value={canvas.backgroundImage || ''} onChange={(e) => onChange({ ...doc, canvas: { ...canvas, backgroundImage: e.target.value || null } })} placeholder="none" aria-label="Background image URL" style={{ flex: 1 }} /><button className="sm" onClick={() => setPicker('background')} aria-label="Choose background image">Library…</button></div></Field>
         </div>
         {picker === 'background' && <MediaPicker title="Choose a background image" allowLogo={false} onClose={() => setPicker(null)} onPick={(url) => { onChange({ ...doc, canvas: { ...canvas, backgroundImage: url || null } }); setPicker(null); }} />}
-        <h3>Screens</h3>
-        <p className="muted small">A screen is a set of visible zones. The first is what the TV shows at boot; PORTAL toggles to "fullscreen" if it exists. Pages are hidden zones a menu opens on top.</p>
-        {(doc.screens || []).map((s) => (
-          <div key={s.id} className="list-row" style={{ alignItems: 'center' }}>
-            <button className={'sm' + (s.id === screenId ? ' primary' : '')} onClick={() => setScreenId(s.id)}>{s.id}</button>
-            <span className="muted small" style={{ flex: 1 }}>{s.zones.length} zone(s)</span>
-            {(doc.screens || []).length > 1 && <button className="sm ghost danger" onClick={() => { onChange(removeScreen(doc, s.id)); if (screenId === s.id) setScreenId(doc.screens[0].id); }} aria-label={`remove screen ${s.id}`}>✕</button>}
-          </div>))}
-        <div className="inline"><input value={newScreen} onChange={(e) => setNewScreen(e.target.value)} placeholder="new screen id (e.g. dining)" aria-label="New screen id" /><button className="sm" disabled={!newScreen.trim()} onClick={() => { onChange(addScreen(doc, newScreen.trim().replace(/[^\w-]/g, ''))); setNewScreen(''); }}>Add</button></div>
+        <h3>Focus ring</h3>
+        <div className="grid2">
+          <Field label="Colour"><ColorInput label="Focus colour" value={focus.color || '#ffd166'} onChange={(v) => setFocus({ color: v })} /></Field>
+          <Field label="Width"><Slider value={focus.width} onChange={(v) => setFocus({ width: v })} min={0} max={20} label="Focus width" fallback={6} /></Field>
+          <Field label="Corner radius"><Slider value={focus.radius} onChange={(v) => setFocus({ radius: v })} min={0} max={60} label="Focus radius" fallback={12} /></Field>
+          <Field label="BACK on the home page"><select value={doc.back_on_home || 'none'} onChange={(e) => onChange({ ...doc, back_on_home: e.target.value })} aria-label="BACK on home"><option value="none">does nothing</option><option value="fullscreen_tv">full-screen TV</option></select></Field>
+        </div>
+        {page && <>
+          <h3>This page</h3>
+          <div className="grid2">
+            <Field label="Page name"><input value={page.name || ''} onChange={(e) => onChange(renamePage(doc, page.id, e.target.value))} aria-label="Page name" /></Field>
+            <Field label="Page id"><input value={page.id} disabled aria-label="Page id" /></Field>
+          </div>
+          {page.id === home ? <p className="muted small">Home page: shown at boot. Its global zones (live TV, channel list, clock, OSD positions) are inherited by pages that ask for it.</p>
+            : <label className="inline" style={{ color: 'var(--text)', fontSize: 13, marginBottom: 10 }}><input type="checkbox" checked={page.inherit !== false} onChange={(e) => onChange(setPageInherit(doc, page.id, e.target.checked))} aria-label="Inherit global zones from home" /> inherit global zones (TV, channel list, clock) from the home page</label>}
+        </>}
         <h3 style={{ marginTop: 16 }}>Remote keys</h3>
-        <p className="muted small">CH±, digits, INFO and UP/DOWN/OK are always handled by the renderer. Map the other keys to actions here.</p>
+        <p className="muted small">CH±, digits, INFO, arrows and OK are always handled by the renderer. PORTAL/GUIDE default to full-screen TV, BACK/EXIT to back.</p>
         {KEY_NAMES.map((k) => (
-          <div key={k} className="list-row" style={{ alignItems: 'center' }}>
-            <span className="mono small" style={{ width: 70 }}>{k}</span>
-            <select value={(doc.keys || {})[k] || ''} onChange={(e) => { const keys = { ...(doc.keys || {}) }; if (e.target.value) keys[k] = e.target.value; else delete keys[k]; onChange({ ...doc, keys }); }} aria-label={`key ${k}`}>
-              <option value="">— default —</option>{BUILTIN_ACTIONS.filter((a) => !['tune', 'launch_app'].includes(a.value)).map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-            </select>
+          <div key={k} className="list-row" style={{ alignItems: 'flex-start' }}>
+            <span className="mono small" style={{ width: 70, paddingTop: 8 }}>{k}</span>
+            <div style={{ flex: 1 }}><ActionPicker doc={doc} value={(doc.keys || {})[k]} onChange={(a) => { const keys = { ...(doc.keys || {}) }; if (a) keys[k] = a; else delete keys[k]; onChange({ ...doc, keys }); }} apps={apps} zones={doc.zones} label={`key ${k}`} /></div>
           </div>))}
       </div>
     );
   }
 
   const errs = errorsByZone[zone.id];
-  const onThisScreen = !screenId || ((doc.screens || []).find((s) => s.id === screenId) || { zones: [] }).zones.includes(zone.id);
+  const onThisPage = pageId ? isOnPage(doc, pageId, zone.id) : true;
+  const inheritedHere = pageId ? isInheritedOnPage(doc, pageId, zone.id) : false;
+  const canAct = ['text', 'image', 'button'].includes(zone.type);
   return (
     <div className="panel">
       <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
@@ -181,14 +207,30 @@ export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, s
         {['x', 'y', 'w', 'h'].map((k) => <Field key={k} label={k.toUpperCase()}><input type="number" value={zone[k]} disabled={!!zone.locked} onChange={(e) => setZ({ [k]: Number(e.target.value) })} aria-label={k.toUpperCase()} /></Field>)}
       </div>
       {!PLACEMENT_TYPES.includes(zone.type) && <div className="inline" style={{ flexWrap: 'wrap', gap: 14, marginBottom: 10 }}>
-        {screenId && (doc.screens || []).length > 0 && <label className="inline" style={{ color: 'var(--text)', fontSize: 13 }}><input type="checkbox" checked={onThisScreen} onChange={() => onChange({ ...doc, screens: doc.screens.map((s) => (s.id !== screenId ? s : s.zones.includes(zone.id) ? { ...s, zones: s.zones.filter((z) => z !== zone.id) } : { ...s, zones: [...s.zones, zone.id] })) })} /> visible on screen "{screenId}"</label>}
-        <label className="inline" style={{ color: 'var(--text)', fontSize: 13 }}><input type="checkbox" checked={!!zone.hidden} onChange={(e) => setZ({ hidden: e.target.checked || undefined })} /> hidden page (opened by a menu action)</label>
+        {pageId && <label className="inline" style={{ color: 'var(--text)', fontSize: 13 }}><input type="checkbox" checked={onThisPage} onChange={() => onChange(toggleZoneInPage(doc, pageId, zone.id))} /> on page "{page ? page.name || page.id : pageId}"{inheritedHere ? <span className="muted"> (inherited from home)</span> : null}</label>}
         <label className="inline" style={{ color: 'var(--text)', fontSize: 13 }}><input type="checkbox" checked={!!zone.locked} onChange={(e) => setZ({ locked: e.target.checked || undefined })} /> locked</label>
+        {GLOBAL_TYPES.includes(zone.type) && <span className="muted small">global zone: placed on home it follows to inheriting pages</span>}
       </div>}
+      {canAct && <Field label="Action (OK on the remote)" hint={zone.type === 'button' ? 'Buttons are focusable; the arrow keys move between focusable zones.' : 'With an action this zone becomes focusable on the TV.'}>
+        <ActionPicker doc={doc} value={zone.action} onChange={(a) => setZ({ action: a || undefined })} apps={apps} zones={doc.zones.filter((z) => z.id !== zone.id)} />
+      </Field>}
 
       {zone.type === 'text' && <>
-        <TextEditor zone={zone} setZ={setZ} setStyle={setStyle} />
+        <TextEditor zone={zone} setZ={setZ} />
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'fontWeight', 'align', 'valign', 'color', 'background', 'padding', 'borderRadius', 'opacity', 'shadow']} />
+      </>}
+      {zone.type === 'button' && <>
+        <div className="grid2">
+          <Field label="Label"><input value={zone.label || ''} onChange={(e) => setZ({ label: e.target.value })} aria-label="Button label" /></Field>
+          <Field label="Icon"><div className="inline"><input value={zone.icon || ''} onChange={(e) => setZ({ icon: e.target.value || undefined })} placeholder="none" aria-label="Button icon URL" style={{ flex: 1 }} /><button className="sm" onClick={() => setPicker('icon')} aria-label="Choose icon">Library…</button></div></Field>
+        </div>
+        {picker === 'icon' && <MediaPicker title="Choose an icon" allowLogo={false} onClose={() => setPicker(null)} onPick={(url) => { setZ({ icon: url }); setPicker(null); }} />}
+        <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'fontWeight', 'color', 'background', 'padding', 'borderRadius', 'opacity']} />
+        <h3>When focused</h3>
+        <div className="grid2">
+          <Field label="Background"><ColorInput label="Focused background" value={(zone.focusStyle || {}).background || ''} onChange={(v) => setZ({ focusStyle: { ...(zone.focusStyle || {}), background: v || undefined } })} /></Field>
+          <Field label="Colour"><ColorInput label="Focused colour" value={(zone.focusStyle || {}).color || ''} onChange={(v) => setZ({ focusStyle: { ...(zone.focusStyle || {}), color: v || undefined } })} /></Field>
+        </div>
       </>}
       {zone.type === 'image' && <>
         <Field label="Image" hint="Pick from the Media library or paste a URL. {{logo}} = the hotel logo from Settings."><div className="inline"><input value={zone.src || ''} onChange={(e) => setZ({ src: e.target.value })} aria-label="Image URL" style={{ flex: 1 }} /><button className="sm" onClick={() => setPicker('image')} aria-label="Choose image">Library…</button></div></Field>
@@ -203,7 +245,7 @@ export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, s
       </>}
       {zone.type === 'video' && <>
         <Field label="Start channel" hint="first, last (remembered on the set) or a channel number"><input value={zone.startChannel ?? 'first'} onChange={(e) => setZ({ startChannel: /^\d+$/.test(e.target.value) ? Number(e.target.value) : e.target.value })} aria-label="Start channel" /></Field>
-        <p className="muted small">The TV tuner draws inside this rectangle. Resizing keeps 16:9 unless Alt is held. On the "fullscreen" screen it fills the canvas.</p>
+        <p className="muted small">The TV tuner draws inside this rectangle. Resizing keeps 16:9 unless Alt is held. The full-screen TV action expands it to the whole canvas.</p>
       </>}
       {zone.type === 'channel_list' && <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'color', 'background', 'highlight', 'padding', 'borderRadius', 'opacity']} />}
       {zone.type === 'menu' && <>
@@ -222,11 +264,11 @@ export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, s
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'color', 'background', 'highlight', 'borderRadius']} />
       </>}
       {zone.type === 'html' && <>
-        <Field label="HTML" hint="Variables like {{hotel}} work here too."><textarea className="code" style={{ minHeight: 160 }} value={zone.html || ''} onChange={(e) => setZ({ html: e.target.value })} aria-label="HTML" /></Field>
+        <Field label="HTML" hint="Variables like {{hotel}} work here too. Put it on its own page for an info screen."><textarea className="code" style={{ minHeight: 160 }} value={zone.html || ''} onChange={(e) => setZ({ html: e.target.value })} aria-label="HTML" /></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'color', 'background', 'padding', 'borderRadius', 'opacity']} />
       </>}
       {PLACEMENT_TYPES.includes(zone.type) && <>
-        <p className="muted small">{zone.type === 'banner' ? 'Where the INFO / channel-change banner appears (number, name, clock).' : zone.type === 'digits' ? 'Where typed channel digits appear.' : 'Where one-off message commands pop up.'} Shown on every screen; delete the zone to use the default position.</p>
+        <p className="muted small">{zone.type === 'banner' ? 'Where the INFO / channel-change banner appears (number, name, clock).' : zone.type === 'digits' ? 'Where typed channel digits appear.' : 'Where one-off message commands pop up.'} Shown on every page; delete the zone to use the default position.</p>
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'fontWeight', 'align', 'color', 'background', 'padding', 'borderRadius', 'opacity']} />
       </>}
       {zone.type === 'weather' && <>

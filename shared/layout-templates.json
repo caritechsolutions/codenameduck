@@ -4,32 +4,223 @@
     "name": "Classic",
     "description": "Live TV on the left, menu on the right, welcome line, clock and logo. Hidden info and dining pages.",
     "json": {
-      "schema": 1,
-      "canvas": { "w": 1920, "h": 1080, "background": "#0b1a2a", "backgroundImage": null },
+      "schema": 2,
+      "canvas": {
+        "w": 1920,
+        "h": 1080,
+        "background": "#0b1a2a",
+        "backgroundImage": null
+      },
       "zones": [
-        { "id": "tv", "type": "video", "x": 80, "y": 200, "w": 1200, "h": 675, "source": "lineup", "startChannel": "first" },
-        { "id": "welcome", "type": "text", "x": 80, "y": 60, "w": 1200, "h": 80, "text": "Welcome to {{hotel}}, {{guest_first}}", "style": { "fontSize": 52, "fontWeight": "bold", "color": "#ffffff", "fontFamily": "Inter" } },
-        { "id": "room", "type": "text", "x": 80, "y": 140, "w": 800, "h": 44, "text": "Room {{room}}  ·  {{date}}", "style": { "fontSize": 28, "color": "#8fb3c9", "fontFamily": "Inter" } },
-        { "id": "logo", "type": "image", "x": 1360, "y": 40, "w": 480, "h": 120, "src": "{{logo}}", "fit": "contain" },
-        { "id": "menu", "type": "menu", "x": 1360, "y": 200, "w": 480, "h": 520,
+        {
+          "id": "tv",
+          "type": "video",
+          "x": 80,
+          "y": 200,
+          "w": 1200,
+          "h": 675,
+          "source": "lineup",
+          "startChannel": "first"
+        },
+        {
+          "id": "welcome",
+          "type": "text",
+          "x": 80,
+          "y": 60,
+          "w": 1200,
+          "h": 80,
+          "text": "Welcome to {{hotel}}, {{guest_first}}",
+          "style": {
+            "fontSize": 52,
+            "fontWeight": "bold",
+            "color": "#ffffff",
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "room",
+          "type": "text",
+          "x": 80,
+          "y": 140,
+          "w": 800,
+          "h": 44,
+          "text": "Room {{room}}  ·  {{date}}",
+          "style": {
+            "fontSize": 28,
+            "color": "#8fb3c9",
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "logo",
+          "type": "image",
+          "x": 1360,
+          "y": 40,
+          "w": 480,
+          "h": 120,
+          "src": "{{logo}}",
+          "fit": "contain"
+        },
+        {
+          "id": "menu",
+          "type": "menu",
+          "x": 1360,
+          "y": 200,
+          "w": 480,
+          "h": 520,
           "items": [
-            { "label": "Watch TV", "action": "fullscreen_tv" },
-            { "label": "Hotel information", "action": "show_page", "page": "info" },
-            { "label": "Dining", "action": "show_page", "page": "dining" },
-            { "label": "Channels", "action": "show_screen", "screen": "channels" }
+            {
+              "label": "Watch TV",
+              "action": "fullscreen_tv"
+            },
+            {
+              "label": "Hotel information",
+              "action": "goto_page",
+              "page": "info"
+            },
+            {
+              "label": "Dining",
+              "action": "goto_page",
+              "page": "dining"
+            },
+            {
+              "label": "Channels",
+              "action": "goto_page",
+              "page": "channels"
+            }
           ],
-          "style": { "fontSize": 36, "color": "#ffffff", "background": "rgba(0,0,0,0.35)", "highlight": "#ffd166", "padding": 16, "borderRadius": 16, "fontFamily": "Inter" } },
-        { "id": "chlist", "type": "channel_list", "x": 1360, "y": 200, "w": 480, "h": 675, "style": { "fontSize": 28, "color": "#ffffff", "background": "rgba(0,0,0,0.35)", "highlight": "#ffd166", "borderRadius": 16 } },
-        { "id": "clock", "type": "clock", "x": 1560, "y": 980, "w": 280, "h": 60, "format": "HH:mm", "style": { "fontSize": 44, "color": "#ffffff", "align": "right", "fontFamily": "Inter" } },
-        { "id": "info", "type": "html", "x": 160, "y": 120, "w": 1600, "h": 840, "hidden": true, "html": "<h1>Hotel information</h1><p>Breakfast is served 7–10 in the lobby restaurant.</p><p>Reception: dial 0 · Wi-Fi: see your welcome card.</p>", "style": { "fontSize": 34, "color": "#ffffff", "background": "rgba(5,12,22,0.94)", "padding": 48, "borderRadius": 24, "fontFamily": "Inter" } },
-        { "id": "dining", "type": "html", "x": 160, "y": 120, "w": 1600, "h": 840, "hidden": true, "html": "<h1>Dining</h1><p>Restaurant open 18:00–22:00. Room service: dial 2.</p>", "style": { "fontSize": 34, "color": "#ffffff", "background": "rgba(5,12,22,0.94)", "padding": 48, "borderRadius": 24, "fontFamily": "Inter" } }
+          "style": {
+            "fontSize": 36,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.35)",
+            "highlight": "#ffd166",
+            "padding": 16,
+            "borderRadius": 16,
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "chlist",
+          "type": "channel_list",
+          "x": 1360,
+          "y": 200,
+          "w": 480,
+          "h": 675,
+          "style": {
+            "fontSize": 28,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.35)",
+            "highlight": "#ffd166",
+            "borderRadius": 16
+          }
+        },
+        {
+          "id": "clock",
+          "type": "clock",
+          "x": 1560,
+          "y": 980,
+          "w": 280,
+          "h": 60,
+          "format": "HH:mm",
+          "style": {
+            "fontSize": 44,
+            "color": "#ffffff",
+            "align": "right",
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "info",
+          "type": "html",
+          "x": 160,
+          "y": 120,
+          "w": 1600,
+          "h": 840,
+          "html": "<h1>Hotel information</h1><p>Breakfast is served 7–10 in the lobby restaurant.</p><p>Reception: dial 0 · Wi-Fi: see your welcome card.</p>",
+          "style": {
+            "fontSize": 34,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.94)",
+            "padding": 48,
+            "borderRadius": 24,
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "dining",
+          "type": "html",
+          "x": 160,
+          "y": 120,
+          "w": 1600,
+          "h": 840,
+          "html": "<h1>Dining</h1><p>Restaurant open 18:00–22:00. Room service: dial 2.</p>",
+          "style": {
+            "fontSize": 34,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.94)",
+            "padding": 48,
+            "borderRadius": 24,
+            "fontFamily": "Inter"
+          }
+        }
       ],
-      "keys": { "PORTAL": "toggle_menu", "BACK": "close_page" },
-      "screens": [
-        { "id": "home", "zones": ["tv", "welcome", "room", "logo", "menu", "clock"] },
-        { "id": "fullscreen", "zones": ["tv"] },
-        { "id": "channels", "zones": ["tv", "welcome", "room", "logo", "chlist", "clock"] }
-      ]
+      "keys": {
+        "PORTAL": {
+          "type": "fullscreen_tv"
+        },
+        "BACK": {
+          "type": "back"
+        }
+      },
+      "pages": [
+        {
+          "id": "home",
+          "name": "Home",
+          "zones": [
+            "tv",
+            "welcome",
+            "room",
+            "logo",
+            "menu",
+            "clock"
+          ],
+          "inherit": false
+        },
+        {
+          "id": "channels",
+          "name": "Channels",
+          "zones": [
+            "welcome",
+            "room",
+            "logo",
+            "chlist"
+          ],
+          "inherit": true
+        },
+        {
+          "id": "info",
+          "name": "Hotel information",
+          "zones": [
+            "info"
+          ],
+          "inherit": true
+        },
+        {
+          "id": "dining",
+          "name": "Dining",
+          "zones": [
+            "dining"
+          ],
+          "inherit": true
+        }
+      ],
+      "home": "home",
+      "focus": {
+        "color": "#ffd166",
+        "width": 6,
+        "radius": 12
+      },
+      "back_on_home": "fullscreen_tv"
     }
   },
   {
@@ -37,19 +228,98 @@
     "name": "Full-screen TV with overlay bar",
     "description": "TV fills the screen; a translucent bar with hotel, room and time sits at the bottom. PORTAL hides the bar.",
     "json": {
-      "schema": 1,
-      "canvas": { "w": 1920, "h": 1080, "background": "#000000", "backgroundImage": null },
+      "schema": 2,
+      "canvas": {
+        "w": 1920,
+        "h": 1080,
+        "background": "#000000",
+        "backgroundImage": null
+      },
       "zones": [
-        { "id": "tv", "type": "video", "x": 0, "y": 0, "w": 1920, "h": 1080, "source": "lineup", "startChannel": "last" },
-        { "id": "bar", "type": "text", "x": 0, "y": 960, "w": 1920, "h": 120, "text": "{{hotel}}   ·   Room {{room}}   ·   {{time}}", "style": { "fontSize": 40, "color": "#ffffff", "background": "rgba(0,0,0,0.55)", "padding": 36, "valign": "middle", "fontFamily": "Roboto", "shadow": "soft" } },
-        { "id": "logo", "type": "image", "x": 1560, "y": 40, "w": 320, "h": 100, "src": "{{logo}}", "fit": "contain", "style": { "opacity": 0.85 } },
-        { "id": "banner", "type": "banner", "x": 80, "y": 840, "w": 1200, "h": 80, "style": { "fontSize": 44, "color": "#ffffff", "background": "rgba(0,0,0,0.7)", "borderRadius": 12, "fontFamily": "Roboto" } }
+        {
+          "id": "tv",
+          "type": "video",
+          "x": 0,
+          "y": 0,
+          "w": 1920,
+          "h": 1080,
+          "source": "lineup",
+          "startChannel": "last"
+        },
+        {
+          "id": "bar",
+          "type": "text",
+          "x": 0,
+          "y": 960,
+          "w": 1920,
+          "h": 120,
+          "text": "{{hotel}}   ·   Room {{room}}   ·   {{time}}",
+          "style": {
+            "fontSize": 40,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.55)",
+            "padding": 36,
+            "valign": "middle",
+            "fontFamily": "Roboto",
+            "shadow": "soft"
+          }
+        },
+        {
+          "id": "logo",
+          "type": "image",
+          "x": 1560,
+          "y": 40,
+          "w": 320,
+          "h": 100,
+          "src": "{{logo}}",
+          "fit": "contain",
+          "style": {
+            "opacity": 0.85
+          }
+        },
+        {
+          "id": "banner",
+          "type": "banner",
+          "x": 80,
+          "y": 840,
+          "w": 1200,
+          "h": 80,
+          "style": {
+            "fontSize": 44,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.7)",
+            "borderRadius": 12,
+            "fontFamily": "Roboto"
+          }
+        }
       ],
-      "keys": { "PORTAL": "toggle_menu", "BACK": "close_page" },
-      "screens": [
-        { "id": "home", "zones": ["tv", "bar", "logo"] },
-        { "id": "fullscreen", "zones": ["tv"] }
-      ]
+      "keys": {
+        "PORTAL": {
+          "type": "fullscreen_tv"
+        },
+        "BACK": {
+          "type": "back"
+        }
+      },
+      "pages": [
+        {
+          "id": "home",
+          "name": "Home",
+          "zones": [
+            "tv",
+            "bar",
+            "logo"
+          ],
+          "inherit": false
+        }
+      ],
+      "home": "home",
+      "focus": {
+        "color": "#ffd166",
+        "width": 6,
+        "radius": 12
+      },
+      "back_on_home": "none"
     }
   },
   {
@@ -57,28 +327,192 @@
     "name": "Welcome page with big photo",
     "description": "A full-bleed photo from the Media library with a large greeting; Watch TV opens the full-screen tuner.",
     "json": {
-      "schema": 1,
-      "canvas": { "w": 1920, "h": 1080, "background": "#101820", "backgroundImage": null },
+      "schema": 2,
+      "canvas": {
+        "w": 1920,
+        "h": 1080,
+        "background": "#101820",
+        "backgroundImage": null
+      },
       "zones": [
-        { "id": "photo", "type": "image", "x": 0, "y": 0, "w": 1920, "h": 1080, "src": "", "fit": "cover" },
-        { "id": "shade", "type": "text", "x": 0, "y": 620, "w": 1920, "h": 460, "text": "", "style": { "background": "linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.75))" } },
-        { "id": "greeting", "type": "text", "x": 120, "y": 680, "w": 1680, "h": 120, "text": "Welcome, {{guest_first}}", "style": { "fontSize": 96, "fontWeight": "bold", "color": "#ffffff", "fontFamily": "Playfair Display", "shadow": "strong" } },
-        { "id": "sub", "type": "text", "x": 120, "y": 810, "w": 1680, "h": 60, "text": "{{hotel}}  ·  Room {{room}}  ·  {{date}}", "style": { "fontSize": 34, "color": "#e6e6e6", "fontFamily": "Inter", "shadow": "soft" } },
-        { "id": "menu", "type": "menu", "x": 120, "y": 900, "w": 1680, "h": 110, "layout": "row",
-          "items": [
-            { "label": "Watch TV", "action": "fullscreen_tv" },
-            { "label": "Hotel information", "action": "show_page", "page": "info" }
-          ],
-          "style": { "fontSize": 36, "color": "#ffffff", "highlight": "#ffd166", "fontFamily": "Inter" } },
-        { "id": "logo", "type": "image", "x": 1440, "y": 60, "w": 400, "h": 120, "src": "{{logo}}", "fit": "contain" },
-        { "id": "tv", "type": "video", "x": 0, "y": 0, "w": 1920, "h": 1080, "source": "lineup", "startChannel": "first" },
-        { "id": "info", "type": "html", "x": 160, "y": 120, "w": 1600, "h": 840, "hidden": true, "html": "<h1>Hotel information</h1><p>Breakfast 7–10 · Reception dial 0.</p>", "style": { "fontSize": 34, "color": "#ffffff", "background": "rgba(5,12,22,0.94)", "padding": 48, "borderRadius": 24, "fontFamily": "Inter" } }
+        {
+          "id": "photo",
+          "type": "image",
+          "x": 0,
+          "y": 0,
+          "w": 1920,
+          "h": 1080,
+          "src": "",
+          "fit": "cover"
+        },
+        {
+          "id": "shade",
+          "type": "text",
+          "x": 0,
+          "y": 620,
+          "w": 1920,
+          "h": 460,
+          "text": "",
+          "style": {
+            "background": "linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0.75))"
+          }
+        },
+        {
+          "id": "greeting",
+          "type": "text",
+          "x": 120,
+          "y": 680,
+          "w": 1680,
+          "h": 120,
+          "text": "Welcome, {{guest_first}}",
+          "style": {
+            "fontSize": 96,
+            "fontWeight": "bold",
+            "color": "#ffffff",
+            "fontFamily": "Playfair Display",
+            "shadow": "strong"
+          }
+        },
+        {
+          "id": "sub",
+          "type": "text",
+          "x": 120,
+          "y": 810,
+          "w": 1680,
+          "h": 60,
+          "text": "{{hotel}}  ·  Room {{room}}  ·  {{date}}",
+          "style": {
+            "fontSize": 34,
+            "color": "#e6e6e6",
+            "fontFamily": "Inter",
+            "shadow": "soft"
+          }
+        },
+        {
+          "id": "logo",
+          "type": "image",
+          "x": 1440,
+          "y": 60,
+          "w": 400,
+          "h": 120,
+          "src": "{{logo}}",
+          "fit": "contain"
+        },
+        {
+          "id": "tv",
+          "type": "video",
+          "x": 0,
+          "y": 0,
+          "w": 1920,
+          "h": 1080,
+          "source": "lineup",
+          "startChannel": "first"
+        },
+        {
+          "id": "info",
+          "type": "html",
+          "x": 160,
+          "y": 120,
+          "w": 1600,
+          "h": 840,
+          "html": "<h1>Hotel information</h1><p>Breakfast 7–10 · Reception dial 0.</p>",
+          "style": {
+            "fontSize": 34,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.94)",
+            "padding": 48,
+            "borderRadius": 24,
+            "fontFamily": "Inter"
+          }
+        },
+        {
+          "id": "btn_tv",
+          "type": "button",
+          "x": 120,
+          "y": 900,
+          "w": 420,
+          "h": 100,
+          "label": "Watch TV",
+          "action": {
+            "type": "fullscreen_tv"
+          },
+          "style": {
+            "fontSize": 36,
+            "color": "#ffffff",
+            "background": "rgba(255,255,255,0.14)",
+            "borderRadius": 16,
+            "fontFamily": "Inter"
+          },
+          "focusStyle": {
+            "background": "#ffd166",
+            "color": "#1a1a1a"
+          }
+        },
+        {
+          "id": "btn_info",
+          "type": "button",
+          "x": 580,
+          "y": 900,
+          "w": 520,
+          "h": 100,
+          "label": "Hotel information",
+          "action": {
+            "type": "goto_page",
+            "page": "info"
+          },
+          "style": {
+            "fontSize": 36,
+            "color": "#ffffff",
+            "background": "rgba(255,255,255,0.14)",
+            "borderRadius": 16,
+            "fontFamily": "Inter"
+          },
+          "focusStyle": {
+            "background": "#ffd166",
+            "color": "#1a1a1a"
+          }
+        }
       ],
-      "keys": { "PORTAL": "home", "BACK": "close_page" },
-      "screens": [
-        { "id": "home", "zones": ["photo", "shade", "greeting", "sub", "menu", "logo"] },
-        { "id": "fullscreen", "zones": ["tv"] }
-      ]
+      "keys": {
+        "PORTAL": {
+          "type": "goto_page",
+          "page": "home"
+        },
+        "BACK": {
+          "type": "back"
+        }
+      },
+      "pages": [
+        {
+          "id": "home",
+          "name": "Home",
+          "zones": [
+            "photo",
+            "shade",
+            "greeting",
+            "sub",
+            "logo",
+            "btn_tv",
+            "btn_info"
+          ],
+          "inherit": false
+        },
+        {
+          "id": "info",
+          "name": "Hotel information",
+          "zones": [
+            "info"
+          ],
+          "inherit": true
+        }
+      ],
+      "home": "home",
+      "focus": {
+        "color": "#ffd166",
+        "width": 6,
+        "radius": 12
+      },
+      "back_on_home": "none"
     }
   },
   {
@@ -86,33 +520,261 @@
     "name": "Info / menu page",
     "description": "Menu on the left, information panel on the right, weather and clock in the header, small TV picture.",
     "json": {
-      "schema": 1,
-      "canvas": { "w": 1920, "h": 1080, "background": "#12202d", "backgroundImage": null },
+      "schema": 2,
+      "canvas": {
+        "w": 1920,
+        "h": 1080,
+        "background": "#12202d",
+        "backgroundImage": null
+      },
       "zones": [
-        { "id": "title", "type": "text", "x": 80, "y": 50, "w": 1000, "h": 80, "text": "{{hotel}}", "style": { "fontSize": 56, "fontWeight": "bold", "color": "#ffffff", "fontFamily": "Montserrat" } },
-        { "id": "weather", "type": "weather", "x": 1200, "y": 50, "w": 380, "h": 80, "units": "metric", "style": { "fontSize": 36, "color": "#ffffff", "align": "right", "fontFamily": "Montserrat" } },
-        { "id": "clock", "type": "clock", "x": 1600, "y": 50, "w": 240, "h": 80, "format": "HH:mm", "style": { "fontSize": 56, "color": "#ffd166", "align": "right", "fontFamily": "Montserrat" } },
-        { "id": "menu", "type": "menu", "x": 80, "y": 180, "w": 520, "h": 480,
+        {
+          "id": "title",
+          "type": "text",
+          "x": 80,
+          "y": 50,
+          "w": 1000,
+          "h": 80,
+          "text": "{{hotel}}",
+          "style": {
+            "fontSize": 56,
+            "fontWeight": "bold",
+            "color": "#ffffff",
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "weather",
+          "type": "weather",
+          "x": 1200,
+          "y": 50,
+          "w": 380,
+          "h": 80,
+          "units": "metric",
+          "style": {
+            "fontSize": 36,
+            "color": "#ffffff",
+            "align": "right",
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "clock",
+          "type": "clock",
+          "x": 1600,
+          "y": 50,
+          "w": 240,
+          "h": 80,
+          "format": "HH:mm",
+          "style": {
+            "fontSize": 56,
+            "color": "#ffd166",
+            "align": "right",
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "menu",
+          "type": "menu",
+          "x": 80,
+          "y": 180,
+          "w": 520,
+          "h": 480,
           "items": [
-            { "label": "Watch TV", "action": "fullscreen_tv" },
-            { "label": "Hotel information", "action": "show_page", "page": "info" },
-            { "label": "Dining", "action": "show_page", "page": "dining" },
-            { "label": "Spa & wellness", "action": "show_page", "page": "spa" }
+            {
+              "label": "Watch TV",
+              "action": "fullscreen_tv"
+            },
+            {
+              "label": "Hotel information",
+              "action": "goto_page",
+              "page": "info"
+            },
+            {
+              "label": "Dining",
+              "action": "goto_page",
+              "page": "dining"
+            },
+            {
+              "label": "Spa & wellness",
+              "action": "goto_page",
+              "page": "spa"
+            }
           ],
-          "style": { "fontSize": 36, "color": "#ffffff", "background": "rgba(0,0,0,0.3)", "highlight": "#ffd166", "padding": 16, "borderRadius": 16, "fontFamily": "Montserrat" } },
-        { "id": "panel", "type": "html", "x": 680, "y": 180, "w": 1160, "h": 480, "html": "<h1>Good to know</h1><p>Breakfast 7–10 in the lobby restaurant · Check-out by 11:00 · Reception: dial 0.</p><p>Select an item on the left for more.</p>", "style": { "fontSize": 32, "color": "#ffffff", "background": "rgba(0,0,0,0.3)", "padding": 40, "borderRadius": 16, "fontFamily": "Montserrat" } },
-        { "id": "tv", "type": "video", "x": 80, "y": 700, "w": 520, "h": 292, "source": "lineup", "startChannel": "first" },
-        { "id": "chlist", "type": "channel_list", "x": 680, "y": 700, "w": 1160, "h": 292, "style": { "fontSize": 28, "color": "#ffffff", "background": "rgba(0,0,0,0.3)", "highlight": "#ffd166", "borderRadius": 16 } },
-        { "id": "footer", "type": "text", "x": 80, "y": 1010, "w": 1760, "h": 40, "text": "Room {{room}}   ·   {{date}}", "style": { "fontSize": 24, "color": "#8fb3c9", "fontFamily": "Montserrat" } },
-        { "id": "info", "type": "html", "x": 680, "y": 180, "w": 1160, "h": 480, "hidden": true, "html": "<h1>Hotel information</h1><p>Wi-Fi: see your welcome card. Late check-out on request.</p>", "style": { "fontSize": 32, "color": "#ffffff", "background": "rgba(5,12,22,0.96)", "padding": 40, "borderRadius": 16, "fontFamily": "Montserrat" } },
-        { "id": "dining", "type": "html", "x": 680, "y": 180, "w": 1160, "h": 480, "hidden": true, "html": "<h1>Dining</h1><p>Restaurant 18:00–22:00 · Bar until midnight · Room service: dial 2.</p>", "style": { "fontSize": 32, "color": "#ffffff", "background": "rgba(5,12,22,0.96)", "padding": 40, "borderRadius": 16, "fontFamily": "Montserrat" } },
-        { "id": "spa", "type": "html", "x": 680, "y": 180, "w": 1160, "h": 480, "hidden": true, "html": "<h1>Spa &amp; wellness</h1><p>Pool and sauna 7:00–21:00 on level -1.</p>", "style": { "fontSize": 32, "color": "#ffffff", "background": "rgba(5,12,22,0.96)", "padding": 40, "borderRadius": 16, "fontFamily": "Montserrat" } }
+          "style": {
+            "fontSize": 36,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.3)",
+            "highlight": "#ffd166",
+            "padding": 16,
+            "borderRadius": 16,
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "panel",
+          "type": "html",
+          "x": 680,
+          "y": 180,
+          "w": 1160,
+          "h": 480,
+          "html": "<h1>Good to know</h1><p>Breakfast 7–10 in the lobby restaurant · Check-out by 11:00 · Reception: dial 0.</p><p>Select an item on the left for more.</p>",
+          "style": {
+            "fontSize": 32,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.3)",
+            "padding": 40,
+            "borderRadius": 16,
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "tv",
+          "type": "video",
+          "x": 80,
+          "y": 700,
+          "w": 520,
+          "h": 292,
+          "source": "lineup",
+          "startChannel": "first"
+        },
+        {
+          "id": "chlist",
+          "type": "channel_list",
+          "x": 680,
+          "y": 700,
+          "w": 1160,
+          "h": 292,
+          "style": {
+            "fontSize": 28,
+            "color": "#ffffff",
+            "background": "rgba(0,0,0,0.3)",
+            "highlight": "#ffd166",
+            "borderRadius": 16
+          }
+        },
+        {
+          "id": "footer",
+          "type": "text",
+          "x": 80,
+          "y": 1010,
+          "w": 1760,
+          "h": 40,
+          "text": "Room {{room}}   ·   {{date}}",
+          "style": {
+            "fontSize": 24,
+            "color": "#8fb3c9",
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "info",
+          "type": "html",
+          "x": 680,
+          "y": 180,
+          "w": 1160,
+          "h": 480,
+          "html": "<h1>Hotel information</h1><p>Wi-Fi: see your welcome card. Late check-out on request.</p>",
+          "style": {
+            "fontSize": 32,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.96)",
+            "padding": 40,
+            "borderRadius": 16,
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "dining",
+          "type": "html",
+          "x": 680,
+          "y": 180,
+          "w": 1160,
+          "h": 480,
+          "html": "<h1>Dining</h1><p>Restaurant 18:00–22:00 · Bar until midnight · Room service: dial 2.</p>",
+          "style": {
+            "fontSize": 32,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.96)",
+            "padding": 40,
+            "borderRadius": 16,
+            "fontFamily": "Montserrat"
+          }
+        },
+        {
+          "id": "spa",
+          "type": "html",
+          "x": 680,
+          "y": 180,
+          "w": 1160,
+          "h": 480,
+          "html": "<h1>Spa &amp; wellness</h1><p>Pool and sauna 7:00–21:00 on level -1.</p>",
+          "style": {
+            "fontSize": 32,
+            "color": "#ffffff",
+            "background": "rgba(5,12,22,0.96)",
+            "padding": 40,
+            "borderRadius": 16,
+            "fontFamily": "Montserrat"
+          }
+        }
       ],
-      "keys": { "PORTAL": "toggle_menu", "BACK": "close_page" },
-      "screens": [
-        { "id": "home", "zones": ["title", "weather", "clock", "menu", "panel", "tv", "chlist", "footer"] },
-        { "id": "fullscreen", "zones": ["tv"] }
-      ]
+      "keys": {
+        "PORTAL": {
+          "type": "fullscreen_tv"
+        },
+        "BACK": {
+          "type": "back"
+        }
+      },
+      "pages": [
+        {
+          "id": "home",
+          "name": "Home",
+          "zones": [
+            "title",
+            "weather",
+            "clock",
+            "menu",
+            "panel",
+            "tv",
+            "chlist",
+            "footer"
+          ],
+          "inherit": false
+        },
+        {
+          "id": "info",
+          "name": "Hotel information",
+          "zones": [
+            "info"
+          ],
+          "inherit": true
+        },
+        {
+          "id": "dining",
+          "name": "Dining",
+          "zones": [
+            "dining"
+          ],
+          "inherit": true
+        },
+        {
+          "id": "spa",
+          "name": "Spa & wellness",
+          "zones": [
+            "spa"
+          ],
+          "inherit": true
+        }
+      ],
+      "home": "home",
+      "focus": {
+        "color": "#ffd166",
+        "width": 6,
+        "radius": 12
+      },
+      "back_on_home": "none"
     }
   }
 ]

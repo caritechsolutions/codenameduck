@@ -14,6 +14,7 @@ const { createChannelsRouter } = require('./routes/channels');
 const { createScreenshotStore } = require('./screenshots');
 const { createTenantRouter, defaultTenantCommand } = require('./routes/tenant');
 const { createAssetStore } = require('./assets');
+const { migrateStoredLayouts } = require('./layout');
 const { createMediaStore } = require('./media');
 const { createMediaRouter } = require('./routes/media');
 const { createAppStore } = require('./apps');
@@ -34,6 +35,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   app.use((req, _res, next) => { req.log = logger; next(); });
 
   syncTenantsFromDisk(db, tenantsDir, logger);
+  migrateStoredLayouts(db, logger);
   const tenants = createTenantResolver(db, tenantsDir, logger);
   const apps = createAppStore(db, { log: logger });
   const state = createStateBuilder(db, { pollIntervalS, apps });

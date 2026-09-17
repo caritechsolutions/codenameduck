@@ -358,3 +358,34 @@ Decisions already made (do not re-open):
 - Unverified on hardware: LG's `application/list` field names (the Raw dialog shows them),
   whether `visibilitychange` fires while a native app is in front, and whether
   `tv/checkout/request` signs Netflix out — see the B3 test plan; Part C decides checkout.
+
+### Part B2b — pages instead of screens, element actions, spatial navigation (2026-09-17)
+
+- Layout schema **2** (`shared/layout-model.js`, import-free ESM; the server loads it with
+  `server/src/esm.js` `loadEsm()`): `pages: [{id, name, zones, inherit}]`, `home`, `keys`
+  values are action objects, `focus: {color, width, radius}`, `back_on_home: none|fullscreen_tv`.
+  `upgradeLayout()` converts v1 on every path (validator, `parseLayoutRow`, renderer
+  `applyLayout`, editor load) and `migrateStoredLayouts()` rewrites the layouts table once at
+  startup: screens → pages (the `fullscreen` screen is dropped), hidden zones → one page each
+  (inherit on), `show_page/show_screen → goto_page`, `close_page → back`, `home → goto_page
+  home`, `toggle_menu → fullscreen_tv`. `validatePages()` checks page ids, refs and actions.
+- Actions (`ACTION_TYPES`): `none | goto_page(page) | back | fullscreen_tv | tune(number) |
+  launch_app(app_id) | toggle(zone)` (`reload` still accepted). Zones of type `text`, `image`,
+  and the new `button` (label, icon, `focusStyle`) carry `action: {type, …}` and become
+  focusable; menu items keep the flat form (`{label, action, page|number|app_id|zone}`).
+  `actionOf()` normalises every spelling.
+- Global zone types (`video, channel_list, banner, digits, popup, clock`) placed on home are
+  shown on pages with `inherit !== false` (`pageZoneIds`). `visibleZoneList(layout, page,
+  {toggled, fullscreen})` is the one visibility rule (renderer + preview).
+- Renderer: `state.page/pageStack/fullscreen/toggled`; `doAction()`; spatial navigation over
+  DOM rects (`focusTargets()` = menu items, app tiles, focusable zones; `spatialNext()` in the
+  model: same-row/column candidates win, otherwise sideways offset is penalised); OK runs the
+  focused action; BACK: leave fullscreen → pop page stack → home → `back_on_home`. PORTAL/GUIDE
+  default to `fullscreen_tv`. Focus ring = CSS vars `--focus-color/width/radius` set on the stage
+  (`shared/zones.css`). Preview messages carry `page`; `tv_page` events on page changes.
+- Editor: `PageNavigator.jsx` (add/rename/duplicate/delete/home/reorder, drag), `ActionPicker`
+  in `ZonePanel` (pages + built-ins, secondary field per type), Layout panel has focus ring, BACK
+  on home, current page name/inherit; `LayoutEdit` keeps `pageId`, Preview follows it (+
+  full-screen checkbox), "Preview on set" posts `{json, page}`. `geometry.js` page helpers:
+  `addPage/renamePage/removePage/duplicatePage/movePage/setHomePage/setPageInherit`.
+- Templates are v2; the welcome template uses two `button` zones.

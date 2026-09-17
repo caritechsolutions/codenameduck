@@ -1,6 +1,7 @@
 // Client-side mirror of server/src/layout.js validateLayout — enough to give instant feedback
 // while typing; the server re-validates on save.
 import SHARED_ZONE_TYPES from '../../shared/zone-types.json';
+import { upgradeLayout, validatePages } from '../../shared/layout-model.js';
 export const ZONE_TYPES = SHARED_ZONE_TYPES;   // single source of truth shared with server and renderer
 
 export function validateLayoutText(text) {
@@ -12,7 +13,7 @@ export function validateLayoutText(text) {
 export function validateLayout(doc) {
   const errors = [];
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return { doc: null, errors: ['Layout must be an object'] };
-  if (doc.schema !== undefined && doc.schema !== 1) errors.push('schema must be 1');
+  if (doc.schema !== undefined && doc.schema !== 1 && doc.schema !== 2) errors.push('schema must be 1 or 2');
   if (!Array.isArray(doc.zones)) errors.push('zones must be an array');
   else {
     const ids = new Set();
@@ -25,9 +26,11 @@ export function validateLayout(doc) {
       for (const k of ['x', 'y', 'w', 'h']) if (z[k] !== undefined && !Number.isFinite(Number(z[k]))) errors.push(`zone "${id}": ${k} must be a number`);
     });
     if (doc.zones.filter((z) => z && z.type === 'video').length > 1) errors.push('at most one video zone');
-    if (Array.isArray(doc.screens)) {
-      doc.screens.forEach((s, i) => (s && Array.isArray(s.zones) ? s.zones : []).forEach((zid) => { if (!ids.has(zid)) errors.push(`screen "${(s && s.id) || i}" references unknown zone "${zid}"`); }));
-    } else if (doc.screens !== undefined) errors.push('screens must be an array');
+    if (doc.screens !== undefined && !Array.isArray(doc.screens)) errors.push('screens must be an array');
+    if (doc.pages !== undefined && !Array.isArray(doc.pages)) errors.push('pages must be an array');
   }
-  return { doc: errors.length ? null : doc, errors };
+  // pages / actions (v1 input is upgraded first: screens → pages, hidden zones → pages)
+  const v2 = Array.isArray(doc.zones) ? upgradeLayout(doc) : null;
+  if (v2) for (const e of validatePages(v2)) errors.push(e);
+  return { doc: errors.length ? null : v2, errors };
 }

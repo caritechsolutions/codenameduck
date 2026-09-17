@@ -221,3 +221,21 @@ button.tb:disabled { opacity: .35; cursor: default; }
 .app-ico { width: 36px; height: 36px; border-radius: 8px; background: var(--panel-2); display: grid; place-items: center; overflow: hidden; font-weight: 700; color: var(--accent); }
 .app-ico img { width: 100%; height: 100%; object-fit: contain; }
 .czone .chglyph.tiles .tile { display: grid; place-items: center; background: rgba(255,255,255,.14); border-radius: 8px; flex: none; }
+
+/* pages (B2b) */
+.pagenav { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; margin-bottom: 10px; }
+.pagenav .pal-title { padding: 2px 4px 6px; display: flex; justify-content: space-between; align-items: center; }
+.page-row { display: flex; align-items: center; gap: 4px; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 13px; border: 1px solid transparent; }
+.page-row:hover { background: var(--panel-2); }
+.page-row.active { border-color: var(--accent); background: var(--panel-2); }
+.page-row.dragover { border-top: 2px solid var(--accent); }
+.page-row .pname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-row .pname small { color: var(--muted); margin-left: 4px; }
+.page-row .pact { display: none; gap: 1px; }
+.page-row:hover .pact, .page-row.active .pact { display: inline-flex; }
+.page-row .pact button { padding: 1px 5px; font-size: 12px; border-color: transparent; background: transparent; }
+.page-row .pact button:hover { border-color: var(--border); }
+.page-row .home-star { color: var(--accent); }
+.czone.inherited { border-style: dashed; opacity: .75; }
+.czone.has-action { box-shadow: inset 0 0 0 1px rgba(255,209,102,.35); }
+.action-picker { display: flex; flex-direction: column; gap: 6px; }

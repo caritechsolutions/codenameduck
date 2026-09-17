@@ -60,7 +60,7 @@ test('ws: layout save and group assignment push immediately; room change deliver
   assert.equal(m.group.name, 'G');
 
   // saving the layout publishes v2 to the connected set
-  const saved = await s.call('PUT', `/api/admin/layouts/${l.id}`, { cookie, body: { json: { ...l.json, zones: [{ id: 'x', type: 'clock', x: 0, y: 0, w: 100, h: 50 }], screens: [] } } });
+  const saved = await s.call('PUT', `/api/admin/layouts/${l.id}`, { cookie, body: { json: { ...l.json, zones: [{ id: 'x', type: 'clock', x: 0, y: 0, w: 100, h: 50 }], pages: [{ id: 'home', name: 'Home', zones: ['x'] }] } } });
   assert.equal(saved.json.pushed, 1);
   m = await c.next();
   assert.equal(m.type, 'layout'); assert.equal(m.layout.version, 2); assert.equal(m.layout.zones[0].id, 'x');

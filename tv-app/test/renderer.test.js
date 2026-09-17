@@ -65,7 +65,7 @@ test('room + group assignment pushes layout and set_property live; layout save r
   const cmds = (await stack.api('GET', `/api/admin/sets/${set.id}`, undefined, cookie)).json.commands;
   assert.deepEqual(cmds.map((c) => c.type + ':' + c.status), ['set_property:acked']);
   // save layout → live redraw with v2
-  await stack.api('PUT', `/api/admin/layouts/${l.id}`, { json: { ...l.json, zones: [{ ...l.json.zones[0], text: 'UPDATED {{room}}' }], screens: [] } }, cookie);
+  await stack.api('PUT', `/api/admin/layouts/${l.id}`, { json: { ...l.json, zones: [{ ...l.json.zones[0], text: 'UPDATED {{room}}' }], pages: [{ id: 'home', name: 'Home', zones: ['w'] }] } }, cookie);
   await r.page.waitForFunction(() => /UPDATED 204/.test(document.body.textContent), null, { timeout: 5000 });
   z = await r.zones();
   assert.equal(z.length, 1);

@@ -61,8 +61,13 @@ test('apps: reported at register, tiles follow the group, OK launches with noSpl
   const tiles = await s.page.$$eval('#zone-apps .apptile', (els) => els.map((e) => ({ name: e.querySelector('.appname').textContent, img: !!e.querySelector('img'), initial: (e.querySelector('.appinitial') || {}).textContent })));
   assert.deepEqual(tiles, [{ name: 'YouTube', img: false, initial: 'Y' }, { name: 'Films', img: true, initial: undefined }]);
   assert.equal(await s.page.$eval('#zone-apps', (e) => getComputedStyle(e).display), 'flex');
-  // remote: DOWN lands on the first navigable zone in layout order (the apps tiles), RIGHT/LEFT walk
+  // remote: the first DOWN lands on the top-left focusable item (the menu), the next DOWN moves
+  // spatially to the tiles below; RIGHT/LEFT walk the row
   await s.key(KEY.DOWN);
+  assert.equal(await s.page.$eval('#zone-menu .menuitem.focused', (e) => e.textContent), 'Netflix');
+  await s.key(KEY.DOWN);   // the tile nearest the menu item's centre
+  assert.equal(await s.page.$eval('#zone-apps .apptile.focused .appname', (e) => e.textContent), 'Films');
+  await s.key(KEY.LEFT);
   assert.equal(await s.page.$eval('#zone-apps .apptile.focused .appname', (e) => e.textContent), 'YouTube');
   await s.key(KEY.RIGHT);
   assert.equal(await s.page.$eval('#zone-apps .apptile.focused .appname', (e) => e.textContent), 'Films');

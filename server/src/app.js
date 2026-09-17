@@ -40,7 +40,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const apps = createAppStore(db, { log: logger });
   const state = createStateBuilder(db, { pollIntervalS, apps });
   const auth = createAuth(db);
-  const hub = createHub({ db, tenants, state, log: logger });
+  const hub = createHub({ db, tenants, state, apps, log: logger });
   const commands = createCommands(db, hub, logger);
   hub.setCommands(commands);
   app.locals.state = state;
@@ -71,7 +71,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   admin.use(createChannelsRouter({ db, hub, log: logger }));
   admin.use(createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, auth, tenantCommand, log: logger }));
   admin.use(createMediaRouter({ db, hub, media, log: logger }));
-  admin.use(createAppsRouter({ db, hub, apps, log: logger }));
+  admin.use(createAppsRouter({ db, hub, apps, commands, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 

@@ -30,7 +30,7 @@ async function setup(t) {
   await stack.api('PUT', `/api/admin/groups/${g.id}/lineup`, { lineup_id: lu.id }, cookie);
   await stack.api('PATCH', '/api/admin/tenant', { default_layout_id: l.id, default_lineup_id: lu.id }, cookie);
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-  await page.addInitScript(fakeIdcap('305MAXX1Z123'));
+  await page.addInitScript(fakeIdcap('305MAXX1Z123', { __appAuth: {} }));   // everything activated (B3b hides un-activated apps)
   // let the test flip document.hidden
   await page.addInitScript(`Object.defineProperty(document, 'hidden', { configurable: true, get: function () { return !!window.__hidden; } });
     window.__setHidden = function (h) { window.__hidden = h; document.dispatchEvent(new Event('visibilitychange')); };`);

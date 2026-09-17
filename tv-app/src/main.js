@@ -29,7 +29,7 @@ var state = {
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
-  apps: [], appsReported: null, hiddenAt: null
+  apps: [], appsReported: null, appsStatus: null, hiddenAt: null
 };
 
 // ---------------------------------------------------------------- logging
@@ -64,6 +64,7 @@ function register() {
   var body = { api: state.api, app_version: APP_VERSION };
   PROPERTY_KEYS.forEach(function (k) { body[k] = state.props[k]; });
   if (state.appsReported) body.apps = state.appsReported;   // idcap://application/list result, raw
+  if (state.appsStatus) body.apps_status = state.appsStatus;   // idcap://application/register/status per app, raw
   return request('POST', '/api/tv/register', body);
 }
 function poll() { return request('GET', '/api/tv/poll' + authQs()); }
@@ -678,6 +679,10 @@ function runCommand(cmd, ack) {
         });
         break;
       case 'launch_app': r = tv.launchApp(p.app_id, p.params).then(function () { return { app_id: p.app_id }; }); break;
+      case 'register_apps': r = registerApps(p).then(function (res) {
+        sendEvent('apps_registration', { ok: res.ok, result: res.result });
+        return refreshAppStatus().then(function () { if (res.ok === false) throw new Error('registration failed: ' + JSON.stringify(res.result)); return res; });
+      }); break;
       default: r = Promise.reject(new Error('unsupported command ' + cmd.type));
     }
   } catch (e) { r = Promise.reject(e); }
@@ -854,7 +859,43 @@ function readAppList() {
     state.appsReported = r || null;
     var n = Array.isArray(r) ? r.length : (r && (r.list || r.applications || r.apps || r.appList) ? (r.list || r.applications || r.apps || r.appList).length : '?');
     log('application/list: ' + n + ' entries');
-  }, function (e) { log('application/list failed: ' + e.message); state.appsReported = null; });
+  }, function (e) { log('application/list failed: ' + e.message); state.appsReported = null; }).then(readAppStatus);
+}
+// App ids out of whatever shape application/list returned.
+function reportedAppIds() {
+  var r = state.appsReported;
+  var arr = Array.isArray(r) ? r : (r && (r.list || r.applications || r.apps || r.appList)) || [];
+  var ids = [];
+  arr.forEach(function (a) { var id = typeof a === 'string' ? a : a && (a.id || a.appId || a.app_id); if (id && ids.indexOf(id) < 0) ids.push(id); });
+  return ids.slice(0, 100);
+}
+// application/register/status per discovered app → state.appsStatus {id: raw}. Sequential, best effort.
+function readAppStatus() {
+  var ids = reportedAppIds();
+  if (!ids.length || state.api !== 'idcap') { state.appsStatus = null; return Promise.resolve(null); }
+  var out = {};
+  var p = Promise.resolve();
+  ids.forEach(function (id) { p = p.then(function () { return tv.appRegisterStatus(id).then(function (r) { if (r != null) out[id] = r; }, function (e) { out[id] = { error: e.message }; }); }); });
+  return p.then(function () { state.appsStatus = out; log('application/register/status: ' + Object.keys(out).length + ' apps'); return out; });
+}
+// After a registration: re-read the status and tell the server (it hides un-activated apps).
+function refreshAppStatus() {
+  return readAppStatus().then(function (st) { if (st) sendEvent('apps_status', { status: st }); return st; });
+}
+// register_apps command: application/register + wait for application_registration_result_received.
+function registerApps(payload) {
+  return new Promise(function (resolve, reject) {
+    var done = false;
+    var t = setTimeout(function () { if (!done) { done = true; resolve({ ok: null, result: { timeout: true } }); } }, 20000);
+    var onResult = function (ev) {
+      if (done) return; done = true; clearTimeout(t);
+      var r = {}; ['result', 'status', 'errorMessage', 'id', 'tokenList', 'accountNumber', 'detail'].forEach(function (k) { if (ev && ev[k] !== undefined) r[k] = ev[k]; });
+      var ok = ev && (ev.result === true || ev.result === 'success' || ev.status === 'success' || ev.status === 'registered') ? true : (ev && (ev.result === false || ev.errorMessage) ? false : null);
+      resolve({ ok: ok, result: r });
+    };
+    tv.on('application_registration_result_received', onResult);
+    tv.registerApps(payload).then(null, function (e) { if (!done) { done = true; clearTimeout(t); reject(e); } });
+  });
 }
 function boot() {
   fitStage({ w: 1920, h: 1080 });

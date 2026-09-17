@@ -315,3 +315,23 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
    zones, shares the globals), ★ set as home, drag to reorder, delete (not home; zones only that
    page used are removed). The Preview tab follows the selected page and has a "full-screen TV"
    checkbox. Actions that point at a deleted page show the red "!" badge on the zone.
+
+## Phase 3 Part B3b — app activation
+
+1. **Status at register.** Power-cycle the set. Apps → the Activation column shows a badge per
+   app: Netflix should read **not activated** (greyed row, tooltip `register/status: …` with LG's
+   exact word), YouTube etc. **activated**. Click **Raw** on Netflix and tell me the
+   `register_status` value LG returned — the server maps registered/unregistered/authorized/… ;
+   anything else shows as "unknown" and I will add it. HCAP-only sets report nothing (unknown).
+2. **Hidden on the set, never labelled.** With Netflix enabled for the group, the Apps zone on
+   the set shows YouTube but not Netflix; nothing on the guest screen says "not activated".
+3. **Register tokens.** Apps → Activation: add the Netflix token LG issued (or the account
+   number), Save, **Register now**. The set's drawer shows a `register_apps` command going
+   `sent → acked` with `ok: true` (or `failed` with LG's message); Registration results lists the
+   set; the Apps table flips Netflix to **activated**, and the Netflix tile appears on the set
+   within seconds (no reboot). Launch it: no "authorize error".
+4. **New sets.** Power-cycle a second set after the tokens are saved: it receives `register_apps`
+   automatically at its first register (drawer shows the command).
+5. **Event name check.** If the command stays `sent` for 20 s and acks with `timeout: true`, LG
+   did not fire `application_registration_result_received` (or fires it under another name) —
+   tell me; the status re-read still runs and the badge tells the truth either way.

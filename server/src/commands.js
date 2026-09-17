@@ -5,7 +5,7 @@
 const { safeJson } = require('./state');
 
 const TYPES = ['reboot', 'power', 'tune', 'volume', 'mute', 'message', 'toast', 'screenshot',
-  'set_property', 'reload_app', 'checkout', 'launch_app'];
+  'set_property', 'reload_app', 'checkout', 'launch_app', 'register_apps'];
 
 function createCommands(db, hub, log = () => {}) {
   const insert = db.prepare(`INSERT INTO commands (tenant_id, set_id, type, payload_json) VALUES (?, ?, ?, ?)`);

@@ -27,6 +27,24 @@ function normalizeAppList(raw) {
   return out;
 }
 
+// LG's register/status reply shape is not in our doc extracts: read the usual field names and
+// map them to activated true/false/null (+ the raw status string for the admin).
+const YES = /^(registered|activated|authorized|authorised|ok|success|true|yes|valid|done|1)$/i;
+const NO = /^(unregistered|not[_ ]?registered|unactivated|unauthorized|unauthorised|fail(ed|ure)?|false|no|invalid|none|error|0)$/i;
+function normalizeAuth(raw) {
+  if (raw == null) return { activated: null, status: null };
+  if (typeof raw === 'boolean') return { activated: raw, status: String(raw) };
+  if (typeof raw === 'string' || typeof raw === 'number') { const v = String(raw); return { activated: YES.test(v) ? true : NO.test(v) ? false : null, status: v.slice(0, 80) }; }
+  if (typeof raw !== 'object') return { activated: null, status: null };
+  for (const k of ['auth', 'auth_status', 'authStatus', 'status', 'registered', 'activated', 'activation', 'result', 'state', 'value']) {
+    if (raw[k] === undefined || raw[k] === null) continue;
+    const v = raw[k];
+    if (typeof v === 'boolean') return { activated: v, status: `${k}=${v}` };
+    if (typeof v === 'string' || typeof v === 'number') { const sv = String(v); if (YES.test(sv)) return { activated: true, status: sv.slice(0, 80) }; if (NO.test(sv)) return { activated: false, status: sv.slice(0, 80) }; return { activated: null, status: sv.slice(0, 80) }; }
+  }
+  return { activated: null, status: null };
+}
+
 function createAppStore(db, { log = () => {} } = {}) {
   const findByAppId = db.prepare('SELECT * FROM apps WHERE tenant_id = ? AND app_id = ?');
   const insert = db.prepare(`INSERT INTO apps (tenant_id, app_id, title, icon_url, type, models_json, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -41,13 +59,30 @@ function createAppStore(db, { log = () => {} } = {}) {
   const clearGroup = db.prepare('DELETE FROM group_apps WHERE group_id = ?');
   const addGroup = db.prepare('INSERT INTO group_apps (group_id, app_id, position) VALUES (?, ?, ?)');
   const setApps = db.prepare('UPDATE sets SET apps_json = ? WHERE id = ?');
+  const upsertStatus = db.prepare(`INSERT INTO set_app_status (set_id, app_id, activated, status, raw_json) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(set_id, app_id) DO UPDATE SET activated = excluded.activated, status = excluded.status, raw_json = excluded.raw_json, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`);
+  const statusForSet = db.prepare('SELECT app_id, activated FROM set_app_status WHERE set_id = ?');
+  const statusAgg = db.prepare(`SELECT
+      SUM(CASE WHEN s.activated = 1 THEN 1 ELSE 0 END) AS activated_sets,
+      SUM(CASE WHEN s.activated = 0 THEN 1 ELSE 0 END) AS unactivated_sets,
+      COUNT(*) AS reported_sets,
+      (SELECT status FROM set_app_status s2 WHERE s2.app_id = s.app_id AND s2.set_id IN (SELECT id FROM sets WHERE tenant_id = ?) ORDER BY s2.updated_at DESC LIMIT 1) AS auth_status
+    FROM set_app_status s JOIN sets st ON st.id = s.set_id WHERE st.tenant_id = ? AND s.app_id = ?`);
+  const upsertReg = db.prepare(`INSERT INTO set_app_registration (set_id, ok, result_json) VALUES (?, ?, ?)
+    ON CONFLICT(set_id) DO UPDATE SET ok = excluded.ok, result_json = excluded.result_json, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`);
+  const regForSet = db.prepare('SELECT ok FROM set_app_registration WHERE set_id = ?');
+  const regResults = db.prepare(`SELECT r.set_id, r.ok, r.result_json, r.updated_at, st.serial, st.room_number, st.model FROM set_app_registration r JOIN sets st ON st.id = r.set_id WHERE st.tenant_id = ? ORDER BY r.updated_at DESC`);
 
-  function toApi(row) {
+  function toApi(row, tenantId) {
     let models = []; try { models = JSON.parse(row.models_json || '[]'); } catch { /* ignore */ }
     let raw = null; try { raw = row.raw_json ? JSON.parse(row.raw_json) : null; } catch { /* ignore */ }
+    const agg = tenantId ? statusAgg.get(tenantId, tenantId, row.app_id) : null;
+    const reported = (agg && agg.reported_sets) || 0, act = (agg && agg.activated_sets) || 0, unact = (agg && agg.unactivated_sets) || 0;
+    const activation = !reported || (!act && !unact) ? 'unknown' : act && !unact ? 'activated' : !act && unact ? 'not_activated' : 'partial';
     return { id: row.id, app_id: row.app_id, title: row.title, icon_url: row.icon_url, type: row.type, name_override: row.name_override, icon_override: row.icon_override,
       name: row.name_override || row.title || row.app_id, icon: row.icon_override || null, models, raw, set_count: row.set_count || 0,
-      group_ids: row.group_ids ? String(row.group_ids).split(',').map(Number) : [], first_seen: row.first_seen, last_seen: row.last_seen };
+      group_ids: row.group_ids ? String(row.group_ids).split(',').map(Number) : [], first_seen: row.first_seen, last_seen: row.last_seen,
+      activation, activated_sets: act, unactivated_sets: unact, reported_sets: reported, auth_status: (agg && agg.auth_status) || null };
   }
   // What a set launches: {id, name, icon} for the tiles/menus. Icons: admin override only —
   // LG's icon paths are TV-local and not fetchable by the page, so we never send them down.
@@ -72,8 +107,8 @@ function createAppStore(db, { log = () => {} } = {}) {
     tx();
     return list.length;
   }
-  function list(tenant) { return listAll.all(tenant.id).map(toApi); }
-  function get(tenant, id) { const r = getOne.get(Number(id), tenant.id); return r ? toApi(r) : null; }
+  function list(tenant) { return listAll.all(tenant.id).map((r) => toApi(r, tenant.id)); }
+  function get(tenant, id) { const r = getOne.get(Number(id), tenant.id); return r ? toApi(r, tenant.id) : null; }
   function updateOverrides(tenant, id, { name_override, icon_override }) {
     const r = getOne.get(Number(id), tenant.id);
     if (!r) return null;
@@ -95,11 +130,60 @@ function createAppStore(db, { log = () => {} } = {}) {
     db.transaction(() => { clearGroup.run(groupId); ids.forEach((id, i) => addGroup.run(groupId, id, i)); })();
     return ids;
   }
+  // Enabled for the set's group, minus apps this set reported as NOT activated (unknown counts
+  // as activated, so HCAP sets and sets that never answered register/status still get them).
   function enabledFor(tenant, set) {
     if (!set.group_id) return [];
-    return enabledForGroup.all(set.group_id).map(toTv);
+    const blocked = new Set(set.id ? statusForSet.all(set.id).filter((r) => r.activated === 0).map((r) => r.app_id) : []);
+    return enabledForGroup.all(set.group_id).filter((r) => !blocked.has(r.app_id)).map(toTv);
   }
-  return { record, list, get, updateOverrides, remove, setGroupApps, enabledFor, normalizeAppList };
+  // Status as the set reported it: {app_id: raw} or [{id, ...}]. Returns rows written.
+  function recordStatus(tenant, set, statusMap) {
+    if (!statusMap || typeof statusMap !== 'object') return 0;
+    const entries = Array.isArray(statusMap) ? statusMap.filter((x) => x && typeof x === 'object' && (x.id || x.appId)).map((x) => [x.id || x.appId, x]) : Object.entries(statusMap);
+    let n = 0;
+    db.transaction(() => {
+      for (const [appId, raw] of entries.slice(0, MAX_APPS)) {
+        if (!appId || typeof appId !== 'string') continue;
+        const a = normalizeAuth(raw);
+        upsertStatus.run(set.id, appId.slice(0, 200), a.activated === null ? null : (a.activated ? 1 : 0), a.status, JSON.stringify(raw).slice(0, 2000));
+        n++;
+      }
+    })();
+    return n;
+  }
+  function statusOf(set) { return statusForSet.all(set.id); }
+  function recordRegistration(tenant, set, { ok, result }) {
+    upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(result == null ? null : result).slice(0, 4000));
+  }
+  function hasRegistered(set) { const r = regForSet.get(set.id); return !!(r && r.ok === 1); }
+  function activationResults(tenant) {
+    return regResults.all(tenant.id).map((r) => { let result = null; try { result = JSON.parse(r.result_json); } catch { /* ignore */ } return { set_id: r.set_id, serial: r.serial, room_number: r.room_number, model: r.model, ok: r.ok == null ? null : !!r.ok, result, updated_at: r.updated_at }; });
+  }
+  // Tenant-level activation config (settings_json.app_activation): {tokens: [{id, token}], accountNumber}.
+  function activationConfig(tenant) {
+    let st = {}; try { st = JSON.parse((db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenant.id) || {}).settings_json || '{}') || {}; } catch { /* ignore */ }
+    const c = st.app_activation && typeof st.app_activation === 'object' ? st.app_activation : {};
+    return { tokens: Array.isArray(c.tokens) ? c.tokens.filter((t) => t && t.id && t.token) : [], accountNumber: c.accountNumber ? String(c.accountNumber) : '' };
+  }
+  function setActivationConfig(tenant, { tokens, accountNumber }) {
+    const row = db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenant.id);
+    let st = {}; try { st = JSON.parse((row && row.settings_json) || '{}') || {}; } catch { /* ignore */ }
+    const list = (Array.isArray(tokens) ? tokens : []).map((t) => ({ id: String((t && t.id) || '').trim().slice(0, 200), token: String((t && t.token) || '').trim().slice(0, 500) })).filter((t) => t.id && t.token);
+    st.app_activation = { tokens: list, accountNumber: String(accountNumber || '').trim().slice(0, 100) };
+    db.prepare('UPDATE tenants SET settings_json = ? WHERE id = ?').run(JSON.stringify(st), tenant.id);
+    return activationConfig(tenant);
+  }
+  // Payload for the register_apps command: LG application/register takes tokenList [{id, token}]
+  // or an accountNumber.
+  function registerPayload(cfg) {
+    const p = {};
+    if (cfg.tokens && cfg.tokens.length) p.tokenList = cfg.tokens.map((t) => ({ id: t.id, token: t.token }));
+    if (cfg.accountNumber) p.accountNumber = cfg.accountNumber;
+    return Object.keys(p).length ? p : null;
+  }
+  return { record, list, get, updateOverrides, remove, setGroupApps, enabledFor, normalizeAppList, normalizeAuth,
+    recordStatus, statusOf, recordRegistration, hasRegistered, activationResults, activationConfig, setActivationConfig, registerPayload };
 }
 
-module.exports = { createAppStore, normalizeAppList };
+module.exports = { createAppStore, normalizeAppList, normalizeAuth };

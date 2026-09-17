@@ -7,11 +7,37 @@
 //   GET    /api/admin/groups/:id/apps      [{id, app_id, name, icon}] in order
 const express = require('express');
 
-function createAppsRouter({ db, hub, apps, log = () => {} }) {
+//   GET    /api/admin/apps/activation      {config: {tokens, accountNumber}, results: [per set]}
+//   PUT    /api/admin/apps/activation      {tokens: [{id, token}], accountNumber}
+//   POST   /api/admin/apps/activation/run  {group_id? | set_ids?} → queues register_apps on the sets
+function createAppsRouter({ db, hub, apps, commands, log = () => {} }) {
   const r = express.Router();
   const qGroup = db.prepare('SELECT id, name FROM groups WHERE id = ? AND tenant_id = ?');
+  const qSets = db.prepare('SELECT * FROM sets WHERE tenant_id = ? ORDER BY id');
+  const qGroupSets = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND group_id = ? ORDER BY id');
 
   r.get('/apps', (req, res) => res.json(apps.list(req.tenant)));
+  r.get('/apps/activation', (req, res) => res.json({ config: apps.activationConfig(req.tenant), results: apps.activationResults(req.tenant) }));
+  r.put('/apps/activation', (req, res) => {
+    const b = req.body || {};
+    if (b.tokens !== undefined && !Array.isArray(b.tokens)) return res.status(400).json({ error: 'tokens must be an array of {id, token}' });
+    const cfg = apps.setActivationConfig(req.tenant, { tokens: b.tokens || [], accountNumber: b.accountNumber || '' });
+    log(`admin ${req.user.username}: app activation config for ${req.tenant.name}: ${cfg.tokens.length} token(s)${cfg.accountNumber ? ', account number set' : ''}`);
+    res.json({ config: cfg });
+  });
+  r.post('/apps/activation/run', (req, res) => {
+    const cfg = apps.activationConfig(req.tenant);
+    const payload = apps.registerPayload(cfg);
+    if (!payload) return res.status(400).json({ error: 'add at least one app token or an account number first' });
+    const b = req.body || {};
+    let sets;
+    if (b.group_id) { const g = qGroup.get(Number(b.group_id), req.tenant.id); if (!g) return res.status(404).json({ error: 'group not found' }); sets = qGroupSets.all(req.tenant.id, g.id); }
+    else if (Array.isArray(b.set_ids)) sets = qSets.all(req.tenant.id).filter((s) => b.set_ids.map(Number).includes(s.id));
+    else sets = qSets.all(req.tenant.id);
+    const ids = sets.map((s) => commands.queue(req.tenant, s, 'register_apps', payload, { dedupe: true }).id);
+    log(`admin ${req.user.username}: register_apps queued for ${ids.length} set(s) of ${req.tenant.name}`);
+    res.json({ queued: ids.length, command_ids: ids });
+  });
   r.patch('/apps/:id', (req, res) => {
     const out = apps.updateOverrides(req.tenant, req.params.id, req.body || {});
     if (!out) return res.status(404).json({ error: 'app not found' });

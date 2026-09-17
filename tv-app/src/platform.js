@@ -77,7 +77,7 @@ export function detect() {
 function wireEvents() {
   var prefix = api === 'idcap' ? 'idcap::' : '';
   ['channel_changed', 'play_start', 'play_end', 'play_error', 'seek_done', 'buffering_start', 'buffering_end',
-   'media_error', 'media_play_error', 'power_mode_changed', 'checkout', 'network_changed'].forEach(function (name) {
+   'media_error', 'media_play_error', 'power_mode_changed', 'checkout', 'network_changed', 'application_registration_result_received'].forEach(function (name) {
     document.addEventListener(prefix + name, function (ev) { emit(name, ev); }, false);
   });
 }
@@ -296,6 +296,23 @@ export function setPowerMode(mode) {
 export function launchApp(id, params, noSplash) {
   var quiet = noSplash === undefined ? true : !!noSplash;
   return api === 'idcap' ? idcapCall('idcap://application/launch', { id: id, params: params || {}, noSplash: quiet }) : hcapCall(hcap.application.launchApplication, { id: id, parameters: params || {} });
+}
+// Activation status of one app (IDCAP application/register/status {id}); HCAP has no equivalent
+// we know of → null. The raw reply goes to the server, which normalises it.
+export function appRegisterStatus(id) {
+  if (api !== 'idcap') return Promise.resolve(null);
+  return idcapCall('idcap://application/register/status', { id: id }, 8000);
+}
+// Register app tokens / an account number: application/register { tokenList: [{id, token}] } or
+// { accountNumber }. LG answers asynchronously with the application_registration_result_received
+// event (wired in wireEvents); the caller waits for it.
+export function registerApps(payload) {
+  var p = {};
+  if (payload && payload.tokenList) p.tokenList = payload.tokenList;
+  if (payload && payload.accountNumber) p.accountNumber = payload.accountNumber;
+  if (api === 'idcap') return idcapCall('idcap://application/register', p, 15000);
+  if (api === 'hcap' && hcap.application && hcap.application.RegisterSIApplicationList) return hcapCall(hcap.application.RegisterSIApplicationList, p);
+  return Promise.reject(new Error('app registration not supported on this set'));
 }
 // Installed/preloaded apps as LG reports them. IDCAP: application/list. HCAP: the preloaded
 // app list plus the installed (SI) application list, merged. The raw shape is passed through

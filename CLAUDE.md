@@ -389,3 +389,24 @@ Decisions already made (do not re-open):
   full-screen checkbox), "Preview on set" posts `{json, page}`. `geometry.js` page helpers:
   `addPage/renamePage/removePage/duplicatePage/movePage/setHomePage/setPageInherit`.
 - Templates are v2; the welcome template uses two `button` zones.
+
+### Part B3b — app activation (2026-09-17)
+
+- Renderer: after `application/list`, `readAppStatus()` calls `application/register/status {id}`
+  per discovered app (IDCAP only) and sends the raw replies as `apps_status` with the register.
+  Command `register_apps {tokenList: [{id, token}] | accountNumber}` → `tv.registerApps()`
+  (`application/register`), waits ≤20 s for the `application_registration_result_received`
+  DOM event (now wired in `platform.js`), acks `{ok, result}`, sends `apps_registration` and a
+  fresh `apps_status` event. Unknown LG field names are passed through raw.
+- Server: migration 010 (`set_app_status`, `set_app_registration`); `apps.js` `normalizeAuth()`
+  (registered/authorized/ok/true… → activated, unregistered/fail… → not; else unknown),
+  `recordStatus/recordRegistration`, `enabledFor()` drops apps the *set itself* reported as not
+  activated (unknown counts as activated so HCAP sets keep their apps); `list()` adds
+  `activation` (activated | not_activated | partial | unknown), counts and `auth_status`. The hub
+  turns `tv_apps_status` / `tv_apps_registration` events into table rows and re-pushes `apps`.
+  Tenant config in `settings_json.app_activation`; `GET/PUT /api/admin/apps/activation`,
+  `POST /api/admin/apps/activation/run {group_id?|set_ids?}` queues `register_apps` (deduped);
+  register queues it automatically for sets without a successful registration.
+- Admin Apps page: Activation column + greyed rows for not-activated apps (admin only), Raw
+  dialog shows the register/status value, Activation panel (tokens per app id, account number,
+  register on all sets / a group, per-set results).

@@ -11,7 +11,7 @@ const PING_MS = 30000;
 const INSTANT_POWER_VALUES = [0, 1, 2, 10];
 function parseInstantPower(v) { if (v == null || v === '') return null; const n = Number(v); return INSTANT_POWER_VALUES.includes(n) ? n : null; }
 
-function createHub({ db, tenants, state, log = () => {} }) {
+function createHub({ db, tenants, state, apps = null, log = () => {} }) {
   const conns = new Map();          // set_id -> { ws, tenantId, sent: {layout, lineup} }
   const findSet = db.prepare('SELECT * FROM sets WHERE id = ? AND tenant_id = ?');
   const findTenant = db.prepare('SELECT * FROM tenants WHERE id = ?');
@@ -120,6 +120,15 @@ function createHub({ db, tenants, state, log = () => {} }) {
     if (ev.at) payload.at = String(ev.at).slice(0, 32);
     insertEvent.run(tenantId, setId, name, JSON.stringify(payload).slice(0, 4000));
     if (name === 'tv_error') log(`TV ERROR set ${setId}: [${payload.kind || '?'}] ${payload.message || ''}`);
+    // app activation reports (B3b): keep the per-set tables and re-push the enabled apps
+    if (apps && (name === 'tv_apps_status' || name === 'tv_apps_registration')) {
+      try {
+        const tenant = findTenant.get(tenantId);
+        if (name === 'tv_apps_status') apps.recordStatus(tenant, { id: setId }, payload.status);
+        else apps.recordRegistration(tenant, { id: setId }, { ok: payload.ok, result: payload.result });
+        refresh(tenantId, { setIds: [setId] });
+      } catch (e) { log(`apps status for set ${setId} failed: ${e.message}`); }
+    }
   }
   function sendJson(ws, obj) { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(obj)); }
 

@@ -73,6 +73,12 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
     // Apps the set reported (idcap://application/list) → apps table, per model.
     let appsSeen = 0;
     if (apps && b.apps) { try { appsSeen = apps.record(tenant, set, b.apps); } catch (e) { log(`${tenant.name}: apps record failed for ${serial}: ${e.message}`); } }
+    if (apps && b.apps_status) { try { apps.recordStatus(tenant, set, b.apps_status); } catch (e) { log(`${tenant.name}: apps status failed for ${serial}: ${e.message}`); } }
+    // Tenant has activation tokens / an account number and this set never registered them → do it now.
+    if (apps && commands) {
+      const payload = apps.registerPayload(apps.activationConfig(tenant));
+      if (payload && !apps.hasRegistered(set)) commands.queue(tenant, set, 'register_apps', payload, { dedupe: true });
+    }
 
     // Admin-assigned room wins: if the TV's own property disagrees, queue a fix (PLATFORM.md §4).
     if (set.room_number && reported !== set.room_number && commands) {

@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -47,6 +47,15 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
         case 'idcap://power/powermode/get': ok({ mode: f.powerMode }); break;
         case 'idcap://power/powermode/set': f.powerMode = p.mode; ok(); break;
         case 'idcap://application/launch': f.launched.push(p); ok(); break;
+        case 'idcap://application/register/status': ok({ id: p.id, status: (f.appAuth || {})[p.id] || 'registered' }); break;
+        case 'idcap://application/register': {
+          f.registered = (f.registered || []).concat([p]);
+          if (p.tokenList) p.tokenList.forEach(function (t) { f.appAuth = f.appAuth || {}; f.appAuth[t.id] = 'registered'; });
+          if (p.accountNumber) { f.appAuth = {}; }
+          ok();
+          setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', { result: true, id: p.tokenList ? p.tokenList.map(function (t) { return t.id; }).join(',') : 'account' }); }, 30);
+          break;
+        }
         case 'idcap://application/list': ok({ list: f.appList || [
           { id: 'netflix', title: 'Netflix', icon: '/usr/palm/applications/netflix/icon.png', type: 'native' },
           { id: 'youtube.leanback.v4', title: 'YouTube', icon: '/usr/palm/applications/youtube/icon.png', type: 'web' },

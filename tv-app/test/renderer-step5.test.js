@@ -45,7 +45,9 @@ test('weather zone, persistent messages, app launcher, checkout command', async 
   const co = (await stack.api('POST', `/api/admin/sets/${set.id}/checkout`, undefined, cookie)).json;
   assert.equal(co.command.status, 'sent');
   await page.waitForFunction(() => window.__fake.checkedOut === true, null, { timeout: 5000 });
-  await page.waitForFunction(() => /Thank you for staying/.test(document.body.textContent), null, { timeout: 5000 });
+  // Part C: the renderer reloads itself after the checkout; the message is shown after the reload
+  await page.waitForFunction(() => window.__fake.launched.some((x) => x.reload), null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => localStorage.getItem('cc_checkout_note')), 'Thank you for staying with us');
   await sleep(200);
   const cmds = (await stack.api('GET', `/api/admin/sets/${set.id}/commands`, undefined, cookie)).json;
   assert.equal(cmds.find((c) => c.type === 'checkout').status, 'acked');

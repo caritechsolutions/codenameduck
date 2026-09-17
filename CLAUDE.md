@@ -446,3 +446,42 @@ Decisions already made (do not re-open):
 - `docs/TENANT-NETWORK-CHECKLIST.md`: NPM websockets, `*.pool.ntp.org`,
   `https://GR.lgtvsdp.com/rest/sdp/v13.0/initservices`, TV time, service country, hotel id.
 - Amazon (`amazon`) is token-only and STB-6500 / webOS 5.0 only; nothing app-specific is sent.
+
+### Part C — local PMS: reservations calendar (2026-09-17)
+
+- Spec in `docs/PHASE3.md` Part C (rewritten). Migration 012: `reservations`, `pms_log`,
+  `import_profiles`, `groups.vacant_layout_id` / `welcome_popup_s`, `tenants.pms_api_key_*`.
+- `server/src/pms.js` `createPms(db, {log, now})` + `attach({hub, commands})`: occupancy rule
+  (`checkin <= D < checkout`, status booked|checked_in; overlaps rejected naming the other
+  reservation), CRUD, `checkinNow` (early arrival moves checkin_date to today, refused while the
+  room is still occupied) / `checkoutNow` (early departure moves checkout_date), cancel (a
+  checked-in guest is checked out), `guestContext(tenant, set)` = the *checked-in* reservation of
+  the set's room → context `guest, guest_first, guest_last, checkin_date, checkout_date, nights,
+  guest_lang, vip, occupied` (blank when vacant; `guest_placeholder` is no longer used),
+  `tick(now)` scheduler (tenant `timezone` via Intl, `checkin_time` default 14:00 / `checkout_time`
+  11:00 in tenant settings; check-outs before check-ins; booked stays whose dates passed are
+  `expired`), welcome popup = `message` command `{text:"Welcome <guest>", ttl_s}` when the group
+  has `welcome_popup_s`, check-out queues `checkout {message}` to every set in the room and
+  refreshes. `state.js` swaps in the group's vacant layout while `pms.occupant()` is null.
+  `app.js` runs the tick 2 s after start and every minute (`scheduler:false` in tests, `now`
+  injectable; `startServer({now})` in testlib).
+- Import: `pms.parseUpload({filename, content_base64})` (CSV auto-delimiter or `.xlsx` via the
+  dependency-free `server/src/xlsx.js`: first sheet, shared/inline strings, date-styled cells →
+  ISO), `guessMapping(headers)` (EN/NL/DE header names), `prepareImport({rows, mapping,
+  date_format})` per-row errors (bad date, room, name, overlap with DB and within the file,
+  already imported), `commitImport` (transaction; skipped rows with reasons; `skippedCsv`),
+  `parseDate(value, format)` formats `auto|YYYY-MM-DD|DD/MM/YYYY|MM/DD/YYYY|DD.MM.YYYY|DD-MM-YYYY|
+  YYYY/MM/DD|excel` (auto = ISO, Excel serial, day-first, then month-first). Profiles per tenant.
+- Routes `server/src/routes/pms.js`: admin `/reservations` CRUD + `/:id/checkin|checkout`,
+  `/rooms?date&group_id`, `/reservations/export` (CSV), `/import/parse|preview|commit|report`,
+  `/import-profiles`, `/pms/settings|key|log`; external `/api/pms/*` with `Authorization: Bearer`
+  or `X-Api-Key` (sha256-hashed key on the tenant row, shown once), idempotent POST; `docs/PMS-API.md`.
+- Admin: `pages/Reservations.jsx` (nav "Rooms": calendar rooms × days week/month with bars,
+  today column, group filter, list/arrivals/departures tabs, reservation modal with check-in/out
+  now + cancel), `pages/ImportReservations.jsx` (`/rooms/import`), Groups vacant layout + welcome
+  popup, Settings time zone / check-in / check-out times + PMS API key card (guest placeholder
+  field removed). Shared `VARIABLES` gained `guest_last`, `checkin_date`, `nights`.
+- Renderer: `checkout` command → `tv/checkout/request`, `localStorage.clear()`, the checkout
+  message is kept in `cc_checkout_note`, ack `{checkout, reload}`, then `tv.reloadApp()` after
+  1.5 s; on boot the note is shown once as a popup. Whether LG's checkout signs Netflix out is a
+  hardware check (TV test plan Part C, step 5).

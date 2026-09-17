@@ -1,15 +1,16 @@
 'use strict';
 // The state a TV needs: resolved layout, lineup, messages, pending commands. Shared by the
 // register/poll routes and the WebSocket hub so every path returns the same shape.
-const { makeLayoutResolver } = require('./layout');
+const { makeLayoutResolver, parseLayoutRow } = require('./layout');
 const { rowToApi: channelToApi } = require('./channels');
 
 const FACTORY_ROOM = /^\[TV\]/i;   // LG factory default room_number is "[TV]<serial>" — never a room
 function isFactoryRoom(v) { return !v || FACTORY_ROOM.test(String(v)); }
 
-function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
+function createStateBuilder(db, { pollIntervalS = 60, apps = null, pms = null } = {}) {
   const resolveLayout = makeLayoutResolver(db);
-  const findGroup = db.prepare('SELECT id, name, instant_power FROM groups WHERE id = ? AND tenant_id = ?');
+  const findGroup = db.prepare('SELECT id, name, instant_power, vacant_layout_id, welcome_popup_s FROM groups WHERE id = ? AND tenant_id = ?');
+  const layoutById = db.prepare('SELECT * FROM layouts WHERE id = ? AND tenant_id = ?');
   const pendingCommands = db.prepare(`SELECT id, type, payload_json FROM commands
     WHERE set_id = ? AND status IN ('queued','sent') ORDER BY id`);
   const lineupItems = db.prepare(`SELECT c.* FROM lineup_items li JOIN channels c ON c.id = li.channel_id
@@ -34,8 +35,19 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
   function settingsOf(tenant) { try { return JSON.parse(tenant.settings_json || '{}') || {}; } catch { return {}; } }
   function context(tenant, set) {
     const st = settingsOf(tenant);
-    return { hotel: tenant.display_name || tenant.name, room: set.room_number || '', guest: st.guest_placeholder || '', serial: set.serial,
-      logo: st.logo_url || '', units: (st.weather && st.weather.units) || 'metric', netflix_hotel_id: st.netflix_hotel_id ? String(st.netflix_hotel_id) : '' };
+    // Guest variables come from the local PMS (Part C): blank while the room is vacant. The
+    // old guest_placeholder is only used when no PMS is wired (tests of older steps).
+    const g = pms ? pms.guestContext(tenant, set) : { guest: st.guest_placeholder || '', guest_first: '', guest_last: '', checkin_date: '', checkout_date: '', nights: '', guest_lang: '', vip: false, occupied: false };
+    return { hotel: tenant.display_name || tenant.name, room: isFactoryRoom(set.room_number) ? '' : (set.room_number || ''), serial: set.serial,
+      logo: st.logo_url || '', units: (st.weather && st.weather.units) || 'metric', netflix_hotel_id: st.netflix_hotel_id ? String(st.netflix_hotel_id) : '', ...g };
+  }
+  // Vacant rooms may show the group's "vacant layout" instead of the normal one.
+  function layoutFor(tenant, set, group) {
+    if (pms && group && group.vacant_layout_id && !pms.occupant(tenant, set.room_number)) {
+      const doc = parseLayoutRow(layoutById.get(group.vacant_layout_id, tenant.id));
+      if (doc) return doc;
+    }
+    return resolveLayout(tenant, set);
   }
 
   function commandsFor(set) {
@@ -52,7 +64,7 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
       group: group ? { id: group.id, name: group.name } : null,
       instant_power: group && group.instant_power != null ? group.instant_power : null,   // desired LG instant_power (0/1/2/10)
       context: context(tenant, set),
-      layout: resolveLayout(tenant, set),
+      layout: layoutFor(tenant, set, group),
       lineup: lineup.channels,
       lineup_id: lineup.id,
       messages: activeMessages.all({ tenant_id: tenant.id, set_id: set.id, group_id: set.group_id || -1 }),

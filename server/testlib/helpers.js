@@ -45,7 +45,8 @@ async function startServer(opts = {}) {
   const db = openDb(':memory:');
   migrate(db);
   const logs = [];
-  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir: opts.dataDir || null, pollIntervalS: 30, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand });
+  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir: opts.dataDir || null, pollIntervalS: 30, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand,
+    scheduler: opts.scheduler === true, now: opts.now });   // PMS scheduler off in tests unless asked; `now` fixes the clock
   await new Promise((resolve) => srv.server.listen(0, '127.0.0.1', resolve));
   const port = srv.server.address().port;
   const base = `http://127.0.0.1:${port}`;

@@ -149,7 +149,7 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
   });
 
   // ---------------------------------------------------------------- groups
-  const qGroups = db.prepare(`SELECT g.*, la.layout_id, l.name AS layout_name, lu.lineup_id, lp.name AS lineup_name,
+  const qGroups = db.prepare(`SELECT g.*, la.layout_id, l.name AS layout_name, lu.lineup_id, lp.name AS lineup_name, (SELECT name FROM layouts v WHERE v.id = g.vacant_layout_id) AS vacant_layout_name,
       (SELECT COUNT(*) FROM sets s WHERE s.group_id = g.id) AS set_count
     FROM groups g LEFT JOIN layout_assign la ON la.group_id = g.id LEFT JOIN layouts l ON l.id = la.layout_id
     LEFT JOIN lineup_assign lu ON lu.group_id = g.id LEFT JOIN lineups lp ON lp.id = lu.lineup_id
@@ -176,8 +176,15 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
       if (b.instant_power != null && b.instant_power !== '' && !INSTANT_POWER_VALUES.includes(Number(b.instant_power))) return res.status(400).json({ error: 'instant_power must be 0, 1, 2, 10 or null' });
       instantPower = b.instant_power == null || b.instant_power === '' ? null : Number(b.instant_power);
     }
+    let vacant = g.vacant_layout_id;
+    if ('vacant_layout_id' in b) {
+      if (b.vacant_layout_id != null && b.vacant_layout_id !== '' && !qLayout.get(Number(b.vacant_layout_id), req.tenant.id)) return res.status(400).json({ error: 'unknown vacant layout' });
+      vacant = b.vacant_layout_id == null || b.vacant_layout_id === '' ? null : Number(b.vacant_layout_id);
+    }
+    let welcome = g.welcome_popup_s;
+    if ('welcome_popup_s' in b) { const n = Number(b.welcome_popup_s); if (!Number.isInteger(n) || n < 0 || n > 600) return res.status(400).json({ error: 'welcome_popup_s must be 0–600 seconds' }); welcome = n; }
     try {
-      db.prepare('UPDATE groups SET name = ?, description = ?, instant_power = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, instantPower, g.id);
+      db.prepare('UPDATE groups SET name = ?, description = ?, instant_power = ?, vacant_layout_id = ?, welcome_popup_s = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, instantPower, vacant, welcome, g.id);
     } catch (e) { return res.status(409).json({ error: 'a group with that name exists' }); }
     let queued = 0;
     if ('instant_power' in b && instantPower !== g.instant_power && instantPower != null) {

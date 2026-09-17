@@ -9,7 +9,7 @@
 
 import { visibleZoneList, isFocusable, actionOf, NAV_ZONE_TYPES, DEFAULT_FOCUS, homePageId } from './layout-model.js';
 
-export var VARIABLES = ['hotel', 'room', 'guest', 'guest_first', 'checkout_date', 'time', 'date'];
+export var VARIABLES = ['hotel', 'room', 'guest', 'guest_first', 'guest_last', 'checkin_date', 'checkout_date', 'nights', 'time', 'date'];
 export var PLACEMENT_TYPES = ['banner', 'digits', 'popup'];
 
 export function substitute(text, ctx) {

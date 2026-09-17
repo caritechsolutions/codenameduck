@@ -25,7 +25,7 @@ test('tenant settings, weather, assets', async (t) => {
   const tw = await s.call('GET', `/api/tv/weather?set_id=${reg.json.set_id}&token=${reg.json.token}`);
   assert.equal(tw.json.temp_c, 18);
   assert.equal(s.weather._cache.size, 1);
-  assert.equal(reg.json.context.guest, 'Guest');
+  assert.equal(reg.json.context.guest, '', 'Part C: {{guest}} is blank while the room is vacant (the placeholder is no longer used)');
   // failing location → graceful
   await s.call('PATCH', '/api/admin/tenant', { cookie, body: { settings: { weather: { lat: 10, lon: 10 } } } });
   w = await s.call('GET', '/api/admin/weather', { cookie });

@@ -6,7 +6,7 @@ const { decodeImageUpload } = require('../assets');
 const { hashPassword, verifyPassword } = require('../auth');
 const { syncTenantsFromDisk } = require('../tenants');
 
-const SETTING_KEYS = ['timezone', 'weather', 'logo_url', 'guest_placeholder', 'checkout_message', 'netflix_hotel_id'];
+const SETTING_KEYS = ['timezone', 'weather', 'logo_url', 'guest_placeholder', 'checkout_message', 'netflix_hotel_id', 'checkin_time', 'checkout_time'];
 
 function parseSettings(t) { try { return JSON.parse(t.settings_json || '{}') || {}; } catch { return {}; } }
 
@@ -37,6 +37,15 @@ function createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, au
     if (b.settings && typeof b.settings === 'object') {
       const cur = parseSettings(t);
       for (const k of SETTING_KEYS) if (k in b.settings) cur[k] = b.settings[k];
+      for (const k of ['checkin_time', 'checkout_time']) {
+        if (!(k in b.settings)) continue;
+        const v = String(b.settings[k] || '').trim();
+        if (v && !/^([01]\d|2[0-3]):[0-5]\d$/.test(v)) return res.status(400).json({ error: `${k}: use HH:MM (24 h)` });
+        cur[k] = v;
+      }
+      if ('timezone' in b.settings && b.settings.timezone) {
+        try { new Intl.DateTimeFormat('en', { timeZone: String(b.settings.timezone) }); } catch { return res.status(400).json({ error: 'timezone: unknown IANA zone (e.g. Europe/Amsterdam)' }); }
+      }
       if ('netflix_hotel_id' in b.settings) {
         const v = String(b.settings.netflix_hotel_id || '').trim();
         if (v && !/^[A-Za-z0-9_.\-]{1,64}$/.test(v)) return res.status(400).json({ error: 'netflix_hotel_id: letters, digits, _ . - only (max 64)' });

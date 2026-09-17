@@ -22,12 +22,14 @@ const { createAppsRouter } = require('./routes/apps');
 const { createLicenceStore } = require('./licences');
 const { createLicencesRouter } = require('./routes/licences');
 const { createWeather } = require('./weather');
+const { createPms } = require('./pms');
+const { createPmsAdminRouter, createPmsApiRouter } = require('./routes/pms');
 
 function timestamp() { return new Date().toISOString(); }
 
 // Builds the Express app + HTTP server + WebSocket hub. Returns { app, server, hub, ... }.
 // Tests call this with an in-memory DB and a temp tenants dir.
-function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log, weatherFetch = undefined, tenantCommand = defaultTenantCommand }) {
+function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log, weatherFetch = undefined, tenantCommand = defaultTenantCommand, scheduler = true, now = undefined }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -41,11 +43,13 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const tenants = createTenantResolver(db, tenantsDir, logger);
   const licences = createLicenceStore(db, { dataDir, log: logger });
   const apps = createAppStore(db, { log: logger, licences });
-  const state = createStateBuilder(db, { pollIntervalS, apps });
+  const pms = createPms(db, { log: logger, now });
+  const state = createStateBuilder(db, { pollIntervalS, apps, pms });
   const auth = createAuth(db);
   const hub = createHub({ db, tenants, state, apps, log: logger });
   const commands = createCommands(db, hub, logger);
   hub.setCommands(commands);
+  pms.attach({ hub, commands });
   app.locals.state = state;
   const screenshots = dataDir ? createScreenshotStore(path.join(dataDir, 'screenshots')) : null;
   const assets = createAssetStore(tenantsDir);
@@ -70,12 +74,14 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   app.use('/api', tenants.middleware);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.use('/api/tv', createTvRouter({ db, state, commands, hub, screenshots, weather, apps, log: logger }));
+  app.use('/api/pms', createPmsApiRouter({ pms, log: logger }));
   const admin = createAdminRouter({ db, auth, hub, commands, screenshots, log: logger });
   admin.use(createChannelsRouter({ db, hub, log: logger }));
   admin.use(createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, auth, tenantCommand, log: logger }));
   admin.use(createMediaRouter({ db, hub, media, log: logger }));
   admin.use(createAppsRouter({ db, hub, apps, commands, log: logger }));
   admin.use(createLicencesRouter({ auth, licences, hub, db, log: logger }));
+  admin.use(createPmsAdminRouter({ pms, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
@@ -104,8 +110,15 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   hub.attach(server);
   const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
   expireTimer.unref();
+  // PMS scheduler: check guests in/out at the tenants' local times; once at startup to catch up.
+  if (scheduler) {
+    const runTick = () => { try { const r = pms.tick(); if (r.checkins || r.checkouts || r.expired) logger(`pms tick: ${r.checkins} check-in(s), ${r.checkouts} check-out(s), ${r.expired} expired`); } catch (e) { logger(`pms tick failed: ${e.stack || e}`); } };
+    setTimeout(runTick, 2000).unref();
+    const pmsTimer = setInterval(runTick, 60000);
+    pmsTimer.unref();
+  }
 
-  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, licences, weather, seeded, log: logger };
+  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, licences, weather, pms, seeded, log: logger };
 }
 
 function escapeHtml(s) {

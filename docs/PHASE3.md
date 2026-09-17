@@ -89,41 +89,54 @@ is on the existing Vite+React admin; the layout JSON schema stays backward compa
 
 ---
 
-## Part C — basic PMS
+## Part C — basic local PMS (reservations calendar)
 
-Minimal but real: rooms have guests, layouts greet them, checkout cleans the TV.
+No external PMS. The platform keeps its own reservations and derives room occupancy from dates.
 
 ### Data
 ```
-rooms       id, tenant_id, room_number (unique per tenant), guest_name, guest_first,
-            guest_lang, checkin_at, checkout_at, status (vacant|occupied), vip (bool), notes
-pms_log     id, tenant_id, room_number, event (checkin|checkout|update), source (manual|api|csv),
-            payload_json, created_at
+reservations  id, tenant_id, room_number, first_name, last_name, checkin_date (DATE),
+              checkout_date (DATE), lang, vip (bool), notes, source (manual|import),
+              status (booked|checked_in|checked_out|cancelled), created_at, updated_at
+pms_log       id, tenant_id, reservation_id, event, source, payload_json, created_at
 ```
-Sets keep `room_number`; a set's guest is looked up by room at render time and pushed on
-change. Multiple sets in one room all get the same guest.
+Rule: a room is occupied on date D by the reservation with checkin_date <= D < checkout_date
+and status in (booked, checked_in). Overlapping reservations for the same room are rejected
+on save/import with a clear message.
 
-### Admin
-- **Rooms** page: table of rooms (auto-created from sets' room numbers, plus manual add),
-  status, guest, dates; inline check-in (name, optional language, checkout date) and
-  check-out buttons; bulk CSV import (room, guest, checkin, checkout).
-- Check-out action: marks vacant, queues `checkout` command to every set in the room
-  (LG `tv/checkout/request`), then pushes the vacant layout (group layout with variables
-  blank; optional per-group "vacant layout").
-- Check-in: pushes the guest variables to the room's sets immediately (`{{guest}}` etc.),
-  optional welcome popup for N seconds (group setting).
+### Admin — Rooms & Reservations
+- Calendar view: rooms down the left, days across the top (week/month), reservation bars
+  spanning check-in to check-out; click a bar to edit, click an empty cell to add. Today
+  column highlighted. Filter by group.
+- List view: table with search, sort, status, and "arrivals today" / "departures today" tabs.
+- Reservation form: room (picker from known rooms + free text), first name, last name,
+  check-in date, check-out date, language, VIP, notes.
+- Manual "Check in now" / "Check out now" buttons override the dates.
 
-### API for external PMS (so a real Opera/Mews/CSV bridge can come later)
-- `POST /api/pms/checkin`, `POST /api/pms/checkout`, `POST /api/pms/update` with a per-tenant
-  API key (Settings → PMS → generate key). JSON body: `{room, guest_name, guest_first?,
-  lang?, checkin_at?, checkout_at?}`. Every call logged to `pms_log`. Idempotent.
-- `GET /api/pms/rooms` for status.
-- Document in `docs/PMS-API.md` with curl examples.
+### Automation (server scheduler, every minute, tenant-timezone aware)
+- At the tenant's check-in time on checkin_date (default 14:00): status → checked_in, push
+  guest variables to the room's sets, optional welcome popup for N seconds (group setting).
+- At check-out time on checkout_date (default 11:00) or on manual check-out: status →
+  checked_out, queue `checkout` command to the room's sets (LG tv/checkout/request), then
+  push the vacant layout with blank variables. Optional per-group "vacant layout".
+- Sets that register or reconnect get the current occupant resolved from today's date.
+
+### Import
+- Import page: upload CSV or XLSX exported from another system. Show the first rows, map
+  columns to room / first name / last name / check-in / check-out (optional lang, notes) with
+  a date-format picker; preview with per-row validation (bad date, unknown room, overlap);
+  import valid rows; download a report of skipped rows.
+- Save the column mapping per tenant as a named profile for one-click re-import.
+- Export: CSV of reservations for a date range.
 
 ### Renderer
-- New variables resolved from the register/poll payload and WS `guest` messages.
-- `checkout` command already exists; after it, the renderer reloads itself
-  (`procentric/application/launch` or `location.reload()`) so no guest state survives.
+- Variables: {{guest}} (first + last), {{guest_first}}, {{guest_last}}, {{checkin_date}},
+  {{checkout_date}}, {{nights}}; blank when vacant. Pushed live on change.
+- After a `checkout` command the renderer reloads itself so no guest state survives.
+
+### API (small, for later bridges)
+- POST /api/pms/reservations, PATCH /api/pms/reservations/:id, GET /api/pms/rooms?date=
+  with a per-tenant API key; every write logged to pms_log. Documented in docs/PMS-API.md.
 
 ---
 

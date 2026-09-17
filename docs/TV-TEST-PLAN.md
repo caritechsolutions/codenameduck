@@ -374,3 +374,44 @@ the LG SDP URL must be reachable, TV time set, service country not "Others").
    whatever `application/list` reports.
 8. **Tenant admin.** Log in as a tenant-admin: no "App licences" entry; Apps → Activation shows
    "Licences on file: netflix" and only the account-number field.
+
+## Phase 3 Part C — local PMS (reservations calendar)
+
+Setup once: Settings → time zone `Europe/Amsterdam` (or the hotel's), check-in 14:00, check-out
+11:00, a checkout message; Groups → optional vacant layout + welcome popup 10 s; a layout with
+`Welcome {{guest_first}} {{guest_last}} · {{nights}} nights · until {{checkout_date}}`.
+The test set must have its room number set in admin (e.g. `101`).
+
+1. **Vacant.** With no reservation the set shows the vacant layout (or the normal one with the
+   guest variables blank — no "undefined", no placeholder text).
+2. **Calendar + form.** Rooms → calendar shows room 101 (from the set) with today highlighted.
+   Click today's cell on 101 → add Jane Doe, check-out in two days → the bar appears; overlapping
+   dates on the same room are refused with the message naming the other reservation.
+3. **Scheduled check-in.** Set the check-in time to two minutes from now (Settings) and wait: at
+   that minute the reservation flips to *checked in* on the Rooms page, the set redraws with
+   "Welcome Jane Doe · 2 nights · until …" without a reboot, and the welcome popup shows for the
+   configured seconds. Journal: `pms hoteldemo: check-in room 101 Jane Doe (scheduler)`.
+4. **Live edits.** Change the last name in the form → the set updates within a second. Move the
+   guest to room 102 → 101 goes vacant, a set in 102 shows the guest.
+5. **Manual check-out + checkout command.** Before checking out, open Netflix on the set (tile
+   or NETFLIX key) and sign in with a test account, then BACK to the portal. Rooms → Check out
+   now. Expect on the set: the drawer shows the `checkout` command acked `{checkout, reload}`, the
+   app reloads (LG's `tv/checkout/request` first), the checkout message popup shows once after
+   the reload, the layout is vacant with blank variables. **Then open Netflix again: it must be
+   signed out** (profile picker / sign-in screen, not the previous account). If Netflix is still
+   signed in, tell me — LG's checkout did not clear the app data and Part C needs a different
+   call (the B3 open question).
+6. **Scheduled check-out.** Second reservation, check-out time set two minutes ahead: at that
+   minute the same happens without anyone in admin; the reservation reads *checked out*.
+7. **Early arrival / late change.** Reservation starting tomorrow → *Check in now*: the calendar
+   bar starts today and the set shows the guest. Editing a checked-out reservation is refused.
+8. **Import.** Rooms → Import…: upload a CSV (or .xlsx) from the previous system; the columns
+   are guessed from the headers, fix the mapping and the date format, Preview shows per-row
+   problems (bad date, no room, overlap), Import adds the good rows, the skipped-rows report
+   downloads, and *Save profile* / load it again restores the mapping. Export CSV covers the
+   visible date range.
+9. **Power cycle.** With a checked-in guest, power-cycle the set: it comes back with the guest
+   variables (resolved at register). After check-out, a power cycle shows the vacant screen.
+10. **API (optional).** Settings → PMS API → Generate key, then the curl examples in
+    `docs/PMS-API.md`: a `POST` creates a booking visible in the calendar, `PATCH {status:
+    "checked_in"}` puts it on the set, without the key → 401.

@@ -143,4 +143,4 @@ function templateLayout(id, name = 'New layout') {
 }
 function starterLayout(name = 'New layout') { return templateLayout('classic', name); }
 
-module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, templateLayout, layoutTemplates, migrateStoredLayouts, upgradeLayout, actionOf, model, ZONE_TYPES };
+module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, templateLayout, layoutTemplates, migrateStoredLayouts, upgradeLayout, actionOf, model, ZONE_TYPES, parseLayoutRow };

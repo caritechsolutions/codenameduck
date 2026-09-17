@@ -17,12 +17,15 @@ import Tenants from './pages/Tenants.jsx';
 import Media from './pages/Media.jsx';
 import Apps from './pages/Apps.jsx';
 import Licences from './pages/Licences.jsx';
+import Reservations from './pages/Reservations.jsx';
+import ImportReservations from './pages/ImportReservations.jsx';
 
 export const SessionCtx = React.createContext(null);
 
 const NAV = [
   ['/', 'Dashboard', '▦'],
   ['/sets', 'Sets', '▭'],
+  ['/rooms', 'Rooms', '⌂'],
   ['/groups', 'Groups', '⊞'],
   ['/layouts', 'Layouts', '▤'],
   ['/channels', 'Channels', '▶'],
@@ -73,6 +76,8 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/sets" element={<Sets />} />
               <Route path="/sets/:id" element={<Sets />} />
+              <Route path="/rooms" element={<Reservations />} />
+              <Route path="/rooms/import" element={<ImportReservations />} />
               <Route path="/groups" element={<Groups />} />
               <Route path="/layouts" element={<Layouts />} />
               <Route path="/layouts/:id" element={<LayoutEdit />} />

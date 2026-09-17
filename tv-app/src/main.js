@@ -674,11 +674,15 @@ function runCommand(cmd, ack) {
       case 'toast': r = tv.toast(p.text || '').then(function () { return { shown: true }; }); break;
       case 'screenshot': r = uploadScreenshot(cmd.id); break;
       case 'checkout':
+        // LG wipes the guest's app data (tv/checkout/request); we drop our own state and reload
+        // the app (docs/PHASE3.md Part C) so nothing of the guest survives in memory either.
+        // The checkout message is shown after the reload (kept in localStorage for that only).
         r = tv.checkout().then(null, function (e) { log('platform checkout failed: ' + e.message); }).then(function () {
-          try { localStorage.clear(); } catch (e) {}
+          try { localStorage.clear(); if (p.message) localStorage.setItem('cc_checkout_note', String(p.message)); } catch (e) {}
           state.lastChannel = null; state.prevChannel = null;
-          if (p.message) showPopup(p.message, 20);
-          return { checkout: true };
+          sendEvent('checkout', { reload: true });
+          setTimeout(function () { tv.reloadApp(); }, 1500);
+          return { checkout: true, reload: true };
         });
         break;
       case 'launch_app': r = launchApp(p.app_id, p.params, p.noSplash, 'launcher').then(function (sent) { return { app_id: p.app_id, params: sent }; }); break;
@@ -978,6 +982,7 @@ function boot() {
   showStatus(true);
   log('CoopCentric renderer ' + APP_VERSION + ' — detecting platform…');
   try { state.lastChannel = Number(localStorage.getItem('cc_last_channel')) || null; state.prevChannel = state.lastChannel; } catch (e) {}
+  try { var note = localStorage.getItem('cc_checkout_note'); if (note) { localStorage.removeItem('cc_checkout_note'); setTimeout(function () { showPopup(note, 20); }, 1500); } } catch (e) {}
   document.addEventListener('keydown', onKeyDown, true);
   tv.on('channel_changed', function (ev) { if (ev && ev.result === false) reportError('channel_changed', ev.errorMessage || 'failed'); });
   ['play_error', 'media_error', 'media_play_error'].forEach(function (n) { tv.on(n, function (ev) { reportError('media_event', n + ': ' + ((ev && (ev.errorMessage || ev.message)) || JSON.stringify(ev && ev.detail || {}))); }); });

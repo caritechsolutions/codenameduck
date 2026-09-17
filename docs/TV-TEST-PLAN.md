@@ -203,3 +203,30 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
 2. Switch to "Always On (10)" and "Off (0)": each acks with the matching string and the label
    follows on the next heartbeat. "Instant On with update-on-off (1)" is there for completeness;
    expect a slower return from standby.
+
+## Phase 3 Part B1 — media library, no boot raster
+
+1. **No tuner raster at boot.** Lineup whose first channel is HLS, layout with a solid canvas
+   background. Power-cycle the set: the video square must show the layout background until the
+   stream has frames, then the picture — never a flash of the last tuner raster. The `url('TV:')`
+   hole now only exists after a tuner channel is selected; the `<video>` element is invisible until
+   its `playing` event. Then CH+ to a multicast channel: the hole appears and the tuner picture
+   shows as before. Back to HLS: background, then stream.
+2. **Media page.** Admin → Media. Drop a PNG/JPG, an SVG and a short MP4 onto the page: tiles
+   appear with thumbnails (MP4 shows a ▶ glyph), width×height and size. Upload a text file
+   renamed `.png`: rejected with "unsupported file type". Rename a file (Enter or Rename button).
+3. **Same-origin on the TV.** In a layout, add an image zone → Library… → pick the PNG. Save &
+   publish: the picture shows on the set. In the nginx access log the request is
+   `/procentric/application/media/<uuid>.png` with `Cache-Control: public, max-age=31536000,
+   immutable` (check with `curl -I http://<host>/procentric/application/media/<uuid>.png`).
+   `sudo coopcentric-tenant deploy <name>` must leave `media/` in place.
+4. **Canvas background from the library.** Canvas panel (nothing selected) → Background image →
+   Library… → pick a photo. Publish: the set shows it behind the zones.
+5. **Delete is blocked while in use.** Media → select that PNG → Delete: a dialog lists "Layout
+   …" with a link, and "The hotel logo" when it is the logo. Remove the zone, publish, delete
+   again: gone from the grid and from `media/` on disk.
+6. **Logo via the library.** Settings → Upload logo: the file lands in Media with the "logo"
+   badge; a `{{logo}}` image zone updates on the set (force redraw is pushed). Media → select
+   another image → "Use as hotel logo": the badge moves, the zone follows.
+7. **Legacy assets.** hoteldemo's existing `assets/` files keep working (Settings shows them
+   under "Legacy assets" only while any exist).

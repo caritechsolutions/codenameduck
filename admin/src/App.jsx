@@ -14,6 +14,7 @@ import Messages from './pages/Messages.jsx';
 import Users from './pages/Users.jsx';
 import Settings from './pages/Settings.jsx';
 import Tenants from './pages/Tenants.jsx';
+import Media from './pages/Media.jsx';
 
 export const SessionCtx = React.createContext(null);
 
@@ -24,6 +25,7 @@ const NAV = [
   ['/layouts', 'Layouts', '▤'],
   ['/channels', 'Channels', '▶'],
   ['/lineups', 'Lineups', '☰'],
+  ['/media', 'Media', '▣'],
   ['/messages', 'Messages', '✉'],
   ['/settings', 'Settings', '⚙'],
   ['/users', 'Users', '☺'],
@@ -73,6 +75,7 @@ export default function App() {
               <Route path="/layouts/:id" element={<LayoutEdit />} />
               <Route path="/channels" element={<Channels />} />
               <Route path="/lineups" element={<Lineups />} />
+              <Route path="/media" element={<Media />} />
               <Route path="/messages" element={<Messages />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/users" element={<Users />} />

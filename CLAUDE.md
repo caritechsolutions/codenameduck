@@ -293,3 +293,23 @@ Decisions already made (do not re-open):
   Always On. `groups.instant_power` (migration 007, old WARM→2/NORMAL→0) is the desired value,
   NULL = leave the set alone; the admin default choice is Instant On (2). Commands carry the value
   as a **string**; `sets.instant_power` stores the real reported value (unknown values ignored).
+
+### Part B1 — media library + no boot raster (2026-09-17)
+
+- Renderer: `#videohost` is created in `idle` mode with **no** `url('TV:')` background; the hole
+  is set only by `setHostMode(false)` when a tuner channel is selected. In html5 mode the host is
+  transparent and the `<video>` has `visibility:hidden` until `data-ready="1"` (set on
+  `playing`/`loadeddata`, cleared on `emptied`/stop), so the layout background shows until the
+  stream has frames. Test: `tv-app/test/renderer-phase3b1.test.js`.
+- Media library: migration `008_media.sql` (`media` table), `server/src/media.js` store —
+  files at `tenants/<name>/procentric/application/media/<uuid>.<ext>`, thumbnails
+  `media/thumbs/<uuid>.jpg` (sharp, ≤320 px), width/height recorded; type is decided by magic
+  bytes (png/jpg/gif/webp/svg/mp4), 10 MB cap. `routes/media.js`: `GET/POST /api/admin/media`
+  (`?as=logo` sets `settings.logo_url`), `PATCH /media/:id` rename, `GET /media/:id/references`,
+  `DELETE` → 409 `{layouts:[{id,name}], logo}` while a layout JSON or the logo contains the URL.
+  nginx: `/procentric/application/media/` immutable one-year cache; `coopcentric-tenant deploy`
+  excludes `media/`. `sharp` is a server dependency (prebuilt binaries via `npm ci`).
+- Admin: `pages/Media.jsx` (drag-drop upload, grid, rename, delete dialog naming the layouts),
+  `components/MediaPicker.jsx` (modal: library / `{{logo}}` / URL / upload) used by the image
+  zone and the canvas background image in `ZonePanel`; Settings uploads the logo through the
+  library and lists old `assets/` files only as "Legacy assets".

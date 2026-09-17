@@ -155,7 +155,7 @@ deploy_app() {
   mkdir -p "$dst" "$(tenant_dir "$name")/procentric/system"
   # assets/ holds tenant uploads (logos, backgrounds) written by the admin — never touched here.
   rsync -a --delete \
-    --exclude='xait.xml.tmpl' --exclude='xait.xml' --exclude='layout.json' --exclude='assets/' \
+    --exclude='xait.xml.tmpl' --exclude='xait.xml' --exclude='layout.json' --exclude='assets/' --exclude='media/' \
     "$TV_APP_SRC/" "$dst/"
   fix_owner "$(tenant_dir "$name")"
   log "deployed tv-app -> $dst"

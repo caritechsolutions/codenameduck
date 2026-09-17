@@ -257,12 +257,14 @@ function render() {
   placeVideo(videoZone);
 }
 
+// The host starts *without* the url('TV:') hole: on a real set the hole shows whatever the
+// tuner plane holds (the last raster) for the second or two before the first HTML5 stream has
+// frames. The hole is created only when a tuner channel is actually selected (setHostMode).
 function ensureVideoHost() {
   if (videoHost) return videoHost;
   videoHost = el('div', 'videohost');
   videoHost.id = 'videohost';
-  videoHost.style.backgroundImage = "url('TV:')";
-  videoHost.style.background = "url('TV:')";
+  videoHost.setAttribute('data-mode', 'idle');
   videoHost.appendChild(ensureVideoEl());
   stage.insertBefore(videoHost, stage.firstChild);
   return videoHost;
@@ -291,10 +293,12 @@ function ensureTvInput() {
     });
   }, function (e) { reportError('input', 'externalinput/get: ' + e.message); }).then(null, function (e) { reportError('input', 'externalinput/set TV: ' + e.message); });
 }
+// html5 mode keeps the host transparent so the layout background stays visible under the
+// <video> until it has frames (the element itself is hidden until 'playing', see ensureVideoEl).
 function setHostMode(html5) {
   ensureVideoHost();
   var tvUrl = "url('TV:')";
-  if (html5) { videoHost.style.backgroundImage = 'none'; videoHost.style.background = '#000'; videoHost.setAttribute('data-mode', 'html5'); }
+  if (html5) { videoHost.style.backgroundImage = 'none'; videoHost.style.background = 'transparent'; videoHost.setAttribute('data-mode', 'html5'); }
   else { videoHost.style.backgroundImage = tvUrl; videoHost.style.background = tvUrl; videoHost.setAttribute('data-mode', 'tuner'); }
 }
 function positionVideoHost(r) {
@@ -378,7 +382,9 @@ function ensureVideoEl() {
     var msg = 'video element error ' + (err ? err.code : '?') + (err && err.message ? ' ' + err.message : '');
     if (videoEl.__reject) videoEl.__reject(new Error(msg));
   });
-  videoEl.addEventListener('playing', function () { if (videoEl.__resolve) videoEl.__resolve(true); });
+  videoEl.addEventListener('playing', function () { videoEl.setAttribute('data-ready', '1'); if (videoEl.__resolve) videoEl.__resolve(true); });
+  videoEl.addEventListener('loadeddata', function () { videoEl.setAttribute('data-ready', '1'); });
+  videoEl.addEventListener('emptied', function () { videoEl.removeAttribute('data-ready'); });
   videoEl.addEventListener('stalled', function () { sendEvent('media', { kind: 'stalled', src: videoEl.currentSrc }); });
   return videoEl;
 }
@@ -391,6 +397,7 @@ function htmlVideoPlay(ch) {
       var t = setTimeout(function () { if (!done) { done = true; reject(new Error('video element timeout')); } }, 15000);
       v.__resolve = function () { if (!done) { done = true; clearTimeout(t); resolve(true); } };
       v.__reject = function (e) { if (!done) { done = true; clearTimeout(t); reject(e); } };
+      v.removeAttribute('data-ready');   // invisible (layout background shows) until it has frames
       v.src = ch.params.url;
       var p = v.play();
       if (p && p.then) p.then(null, function (e) { v.__reject(new Error('play() rejected: ' + (e && e.message))); });
@@ -399,7 +406,7 @@ function htmlVideoPlay(ch) {
 }
 function htmlVideoStop() {
   if (!videoEl) return;
-  try { videoEl.__resolve = null; videoEl.__reject = null; videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); } catch (e) {}
+  try { videoEl.__resolve = null; videoEl.__reject = null; videoEl.removeAttribute('data-ready'); videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); } catch (e) {}
 }
 // URL channel: HTML5 <video> first; if the element cannot play it, fall back to LG's media
 // pipeline (tv/media/*), and report whatever fails.

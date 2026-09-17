@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { get } from '../api.js';
+import React, { useState } from 'react';
 import { Field } from '../components/ui.jsx';
+import MediaPicker from '../components/MediaPicker.jsx';
 import { ZONE_TYPES, PLACEMENT_TYPES, ACTIONS, KEY_NAMES, updateZone, renameZone, removeZone, moveZoneOrder, duplicateZone, toggleZoneInScreen, addScreen, removeScreen } from './geometry.js';
 
 const num = (v) => (v === '' || v == null ? undefined : Number(v));
@@ -48,8 +48,7 @@ function ListEditor({ items, onChange, fields, addLabel }) {
 export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenId, setScreenId }) {
   const zone = doc.zones.find((z) => z.id === selectedId);
   const [newScreen, setNewScreen] = useState('');
-  const [assetList, setAssetList] = useState([]);
-  useEffect(() => { if (zone && zone.type === 'image') get('/assets').then(setAssetList, () => setAssetList([])); }, [zone && zone.type]); // eslint-disable-line
+  const [picker, setPicker] = useState(null);   // 'image' | 'background'
   const canvas = doc.canvas || {};
   const setZ = (patch) => onChange(updateZone(doc, zone.id, patch));
   const setStyle = (style) => setZ({ style });
@@ -60,8 +59,9 @@ export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenI
         <h3>Canvas</h3>
         <div className="grid2">
           <Field label="Background"><ColorInput value={canvas.background || '#0b1a2a'} onChange={(v) => onChange({ ...doc, canvas: { ...canvas, background: v } })} /></Field>
-          <Field label="Background image URL"><input value={canvas.backgroundImage || ''} onChange={(e) => onChange({ ...doc, canvas: { ...canvas, backgroundImage: e.target.value || null } })} placeholder="/procentric/application/assets/bg.jpg" /></Field>
+          <Field label="Background image"><div className="inline"><input value={canvas.backgroundImage || ''} onChange={(e) => onChange({ ...doc, canvas: { ...canvas, backgroundImage: e.target.value || null } })} placeholder="none" aria-label="Background image URL" style={{ flex: 1 }} /><button className="sm" onClick={() => setPicker('background')} aria-label="Choose background image">Library…</button></div></Field>
         </div>
+        {picker === 'background' && <MediaPicker title="Choose a background image" allowLogo={false} onClose={() => setPicker(null)} onPick={(url) => { onChange({ ...doc, canvas: { ...canvas, backgroundImage: url || null } }); setPicker(null); }} />}
         <h3>Screens</h3>
         <p className="muted small">A screen is a set of visible zones. The first screen is what the TV shows at boot; PORTAL toggles to "fullscreen" if it exists.</p>
         {(doc.screens || []).map((s) => (
@@ -113,8 +113,9 @@ export default function ZonePanel({ doc, selectedId, onChange, onSelect, screenI
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontSize', 'color', 'background', 'align', 'fontWeight', 'padding', 'borderRadius', 'opacity']} />
       </>}
       {zone.type === 'image' && <>
-        <Field label="Image URL" hint="Upload images under Settings → Assets. {{logo}} = the tenant logo."><input value={zone.src || ''} onChange={(e) => setZ({ src: e.target.value })} aria-label="Image URL" /></Field>
-        {assetList.length > 0 && <Field label="Pick an uploaded asset"><select value="" onChange={(e) => { if (e.target.value) setZ({ src: e.target.value }); }} aria-label="Asset picker"><option value="">—</option><option value="{{logo}}">tenant logo</option>{assetList.map((a) => <option key={a.name} value={a.url}>{a.name}</option>)}</select></Field>}
+        <Field label="Image" hint="Pick from the Media library or paste a URL. {{logo}} = the hotel logo from Settings."><div className="inline"><input value={zone.src || ''} onChange={(e) => setZ({ src: e.target.value })} aria-label="Image URL" style={{ flex: 1 }} /><button className="sm" onClick={() => setPicker('image')} aria-label="Choose image">Library…</button></div></Field>
+        {zone.src && !/\{\{/.test(zone.src) && <div className="media-inline-preview"><img src={zone.src} alt="" /></div>}
+        {picker === 'image' && <MediaPicker onClose={() => setPicker(null)} onPick={(url) => { setZ({ src: url }); setPicker(null); }} />}
         <Field label="Fit"><select value={zone.fit || 'contain'} onChange={(e) => setZ({ fit: e.target.value })}><option>contain</option><option>cover</option><option>fill</option></select></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['background', 'borderRadius', 'opacity']} />
       </>}

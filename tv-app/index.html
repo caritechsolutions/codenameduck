@@ -12,8 +12,9 @@
   .zone{position:absolute;overflow:hidden;box-sizing:border-box;white-space:pre-wrap;line-height:1.15}
   .zone img{width:100%;height:100%;object-fit:contain;display:block}
   .zone-video{background:transparent}
-  #videohost{position:absolute;left:0;top:0;width:0;height:0;overflow:hidden;background:url('TV:');display:none}
-  .urlvideo{position:absolute;left:0;top:0;width:100%;height:100%;background:#000;object-fit:contain;display:block}
+  #videohost{position:absolute;left:0;top:0;width:0;height:0;overflow:hidden;background:transparent;display:none}
+  .urlvideo{position:absolute;left:0;top:0;width:100%;height:100%;background:transparent;object-fit:contain;display:block;visibility:hidden}
+  .urlvideo[data-ready="1"]{visibility:visible;background:#000}
   .chlist{display:flex;flex-direction:column}
   .chrow{display:flex;align-items:center;gap:16px;padding:0 16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:8px}
   .chrow.current{background:rgba(255,255,255,.18)}

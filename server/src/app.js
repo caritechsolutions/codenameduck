@@ -14,6 +14,8 @@ const { createChannelsRouter } = require('./routes/channels');
 const { createScreenshotStore } = require('./screenshots');
 const { createTenantRouter, defaultTenantCommand } = require('./routes/tenant');
 const { createAssetStore } = require('./assets');
+const { createMediaStore } = require('./media');
+const { createMediaRouter } = require('./routes/media');
 const { createWeather } = require('./weather');
 
 function timestamp() { return new Date().toISOString(); }
@@ -39,6 +41,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   app.locals.state = state;
   const screenshots = dataDir ? createScreenshotStore(path.join(dataDir, 'screenshots')) : null;
   const assets = createAssetStore(tenantsDir);
+  const media = createMediaStore(db, tenantsDir, { log: logger });
   const weather = createWeather({ fetcher: weatherFetch, log: logger });
 
   const seeded = seedSuperadmin(db);
@@ -62,6 +65,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const admin = createAdminRouter({ db, auth, hub, commands, screenshots, log: logger });
   admin.use(createChannelsRouter({ db, hub, log: logger }));
   admin.use(createTenantRouter({ db, hub, commands, assets, weather, tenantsDir, auth, tenantCommand, log: logger }));
+  admin.use(createMediaRouter({ db, hub, media, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
@@ -91,7 +95,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
   expireTimer.unref();
 
-  return { app, server, hub, commands, state, auth, tenants, assets, weather, seeded, log: logger };
+  return { app, server, hub, commands, state, auth, tenants, assets, media, weather, seeded, log: logger };
 }
 
 function escapeHtml(s) {

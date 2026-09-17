@@ -3,6 +3,8 @@ import { get, patch, post, del, api } from '../api.js';
 import { useAsync, Field, useToast } from '../components/ui.jsx';
 import { SessionCtx } from '../App.jsx';
 import { timeAgo } from '../util.js';
+import { uploadMedia } from '../components/MediaPicker.jsx';
+import { Link } from 'react-router-dom';
 
 export default function Settings() {
   const toast = useToast();
@@ -32,12 +34,11 @@ export default function Settings() {
     } catch (err) { toast(err.message, 'bad'); } finally { setSaving(false); }
   }
   async function checkWeather() { try { setWeather(await get('/weather')); } catch (err) { toast(err.message, 'bad'); } }
-  async function upload(e, asLogo) {
+  async function uploadLogo(e) {
     const file = e.target.files[0]; if (!file) return;
     try {
-      const r = await fetch(`/api/admin/assets${asLogo ? '?as=logo' : ''}`, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Filename': file.name }, body: file, credentials: 'same-origin' });
-      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'upload failed');
-      toast(`Uploaded ${j.name}`); assets.reload(); if (asLogo) tenant.reload();
+      const j = await uploadMedia(file, { asLogo: true });
+      toast(`Logo set to ${j.name} · pushed to online sets`); tenant.reload(); session.refresh();
     } catch (err) { toast(err.message, 'bad'); }
     e.target.value = '';
   }
@@ -74,19 +75,19 @@ export default function Settings() {
             <h2>Logo</h2>
             <div className="inline" style={{ gap: 16 }}>
               {logo ? <img src={logo + '?t=' + Date.now()} alt="logo" style={{ maxHeight: 80, maxWidth: 240, background: '#0b1a2a', padding: 6, borderRadius: 6 }} /> : <span className="muted">No logo uploaded.</span>}
-              <label className="btn">Upload logo<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => upload(e, true)} /></label>
+              <label className="btn">Upload logo<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml" style={{ display: 'none' }} onChange={uploadLogo} aria-label="Upload logo" /></label>
             </div>
-            <p className="muted small">Use it in layouts as an image zone with src <code>{'{{logo}}'}</code> or the URL below.</p>
+            <p className="muted small">The logo is stored in the <Link to="/media">Media library</Link> (any library image can be made the logo there). Use it in layouts as an image zone with src <code>{'{{logo}}'}</code>.</p>
           </div>
-          <div className="card" style={{ marginTop: 12 }}>
-            <h2>Assets <label className="btn sm" style={{ float: 'right' }}>Upload image<input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => upload(e, false)} /></label></h2>
-            <p className="muted small">Backgrounds, channel logos, pictures for image zones. Served from this tenant's own hostname.</p>
-            {(assets.data || []).length === 0 ? <div className="muted small">None yet.</div> : (
+          {(assets.data || []).length > 0 && <div className="card" style={{ marginTop: 12 }}>
+            <h2>Legacy assets</h2>
+            <p className="muted small">Files uploaded before the Media library existed. They keep working; new uploads go to <Link to="/media">Media</Link>.</p>
+            {(
               <table><tbody>{assets.data.map((a) => (
                 <tr key={a.name}><td style={{ width: 70 }}><img src={a.url} alt="" style={{ height: 36, maxWidth: 60, objectFit: 'contain' }} /></td>
                   <td><code className="small">{a.url}</code><div className="muted small">{Math.round(a.bytes / 1024)} kB · {timeAgo(a.mtime)}</div></td>
                   <td style={{ textAlign: 'right' }}><button className="sm danger" onClick={() => removeAsset(a)}>Delete</button></td></tr>))}</tbody></table>)}
-          </div>
+          </div>}
         </div>
       </div>
     </>

@@ -145,3 +145,26 @@ textarea.code { min-height: 380px; font-size: 12px; white-space: pre; tab-size: 
 .lasterr .mono { margin-top: 4px; word-break: break-all; }
 
 .czone.t-banner, .czone.t-digits, .czone.t-popup { border-style: dashed; border-color: rgba(255,209,102,.7); }
+
+/* media library (B1) */
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 12px; min-height: 160px; transition: border-color .15s, background .15s; }
+.dropzone.drag { border-color: var(--accent, #4da3ff); background: rgba(77,163,255,.08); }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.media-grid.picker { max-height: 52vh; overflow: auto; padding: 2px; }
+.media-tile { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; outline: none; }
+.media-tile:hover, .media-tile:focus { border-color: var(--accent, #4da3ff); }
+.media-tile.selected { border-color: var(--accent, #4da3ff); box-shadow: 0 0 0 2px rgba(77,163,255,.35); }
+.media-thumb { aspect-ratio: 16/9; background: #0b1a2a repeating-conic-gradient(rgba(255,255,255,.05) 0 25%, transparent 0 50%) 0 0/16px 16px; display: grid; place-items: center; overflow: hidden; }
+.media-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.media-glyph { font-size: 28px; opacity: .7; }
+.media-meta { padding: 6px 8px; }
+.media-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-badge { position: absolute; top: 6px; left: 6px; }
+.media-detail { margin-top: 12px; }
+.media-preview { width: 280px; flex: none; background: #0b1a2a; border-radius: 6px; padding: 6px; display: grid; place-items: center; }
+.media-preview img { max-width: 100%; max-height: 200px; object-fit: contain; }
+.media-inline-preview { margin: -4px 0 10px; background: #0b1a2a; border-radius: 6px; padding: 4px; text-align: center; }
+.media-inline-preview img { max-height: 90px; max-width: 100%; object-fit: contain; }
+table.kv td { padding: 3px 8px 3px 0; vertical-align: top; }
+.modal.wide { width: 760px; }
+label.btn.disabled { opacity: .6; pointer-events: none; }

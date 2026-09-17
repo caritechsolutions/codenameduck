@@ -292,8 +292,23 @@ export function setPowerMode(mode) {
   var m = String(mode).toUpperCase() === 'WARM' ? 'WARM' : 'NORMAL';
   return api === 'idcap' ? idcapCall('idcap://power/powermode/set', { mode: m }) : hcapCall(hcap.power.setPowerMode, { mode: hcap.power.PowerMode[m] });
 }
-export function launchApp(id, params) {
-  return api === 'idcap' ? idcapCall('idcap://application/launch', { id: id, params: params || {} }) : hcapCall(hcap.application.launchApplication, { id: id, parameters: params || {} });
+// noSplash defaults to true (docs/PHASE3.md: application/launch { id, params?, noSplash? }).
+export function launchApp(id, params, noSplash) {
+  var quiet = noSplash === undefined ? true : !!noSplash;
+  return api === 'idcap' ? idcapCall('idcap://application/launch', { id: id, params: params || {}, noSplash: quiet }) : hcapCall(hcap.application.launchApplication, { id: id, parameters: params || {} });
+}
+// Installed/preloaded apps as LG reports them. IDCAP: application/list. HCAP: the preloaded
+// app list plus the installed (SI) application list, merged. The raw shape is passed through
+// to the server (it normalises id/title/icon and keeps one raw entry for the docs).
+export function listApps() {
+  if (api === 'idcap') return idcapCall('idcap://application/list', {});
+  if (api !== 'hcap') return Promise.resolve([]);
+  var out = [];
+  var pre = hcap.preloadedApplication && hcap.preloadedApplication.getPreloadedApplicationList ? hcapCall(hcap.preloadedApplication.getPreloadedApplicationList, {}) : Promise.resolve(null);
+  return pre.then(function (r) { if (r) out.push(r); }, function () {})
+    .then(function () { return hcap.application && hcap.application.getApplicationList ? hcapCall(hcap.application.getApplicationList, {}) : null; })
+    .then(function (r) { if (r) out.push(r); }, function () {})
+    .then(function () { return out; });
 }
 export function reloadApp() {
   var p = api === 'idcap' ? idcapCall('idcap://procentric/application/launch', {}) : hcapCall(hcap.system.launchHcapHtmlApplication, {});

@@ -337,3 +337,24 @@ Decisions already made (do not re-open):
   `Palette`, `EditorToolbar`, `ZonePanel` (typed controls, font picker, variables menu, menu action
   picker with pages/screens/apps), `LayoutEdit` (Canvas / Preview / Advanced tabs, screen tabs,
   undo/redo 50, Ctrl-D, Delete, inline errors). `menu.layout: "row"` draws items horizontally.
+
+### Part B3 — apps (2026-09-17)
+
+- Renderer: `tv.listApps()` at boot (IDCAP `application/list`; HCAP preloaded + application
+  lists merged) → sent raw as `apps` in the register body. `tv.launchApp(id, params, noSplash)`
+  sends `noSplash: true` by default. `visibilitychange` hidden → `pauseForBackground()` (pause
+  `<video>` / `channel/stop`), visible → `resumeFromBackground()` (re-claim keys, `placeVideo`
+  resumes, `tv_visibility {resumed, away_s}` event). LEFT/RIGHT also move menu focus.
+- Server: migration 009 (`apps`, `group_apps`, `sets.apps_json`), `src/apps.js`
+  (`normalizeAppList` accepts array / `{list|applications|apps|appList}` with `id|appId|name`,
+  `title|name`, `icon|iconUrl`; keeps one raw entry per app; models seen), `routes/apps.js`
+  (`GET/PATCH/DELETE /api/admin/apps`, `GET/PUT /api/admin/groups/:id/apps`). TV state carries
+  `apps: [{id, name, icon}]` = enabled for the set's group (no group → none); WS pushes `apps`.
+  LG icon paths are stored (`icon_url`) but never sent to the TV; only the admin override is.
+- `apps` zone type (shared list + `drawApps` in `shared/zone-draw.js`): tiles of `env.apps`,
+  `layout: row|grid`, `style.tileSize`; navigable like a menu; OK = `launch_app`. The editor's
+  menu action picker offers discovered apps (`/api/admin/apps`) for "Launch app…".
+- Admin **Apps** page: matrix apps × groups, Edit (display name, icon from Media), Raw, Forget.
+- Unverified on hardware: LG's `application/list` field names (the Raw dialog shows them),
+  whether `visibilitychange` fires while a native app is in front, and whether
+  `tv/checkout/request` signs Netflix out — see the B3 test plan; Part C decides checkout.

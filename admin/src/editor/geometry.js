@@ -29,7 +29,7 @@ export const PALETTE = [
   { group: 'Text', items: [['text', 'Text']] },
   { group: 'Image', items: [['image', 'Image']] },
   { group: 'Channel list', items: [['channel_list', 'Channel list']] },
-  { group: 'Menu', items: [['menu', 'Menu'], ['app_launcher', 'App launcher']] },
+  { group: 'Menu', items: [['menu', 'Menu'], ['apps', 'Apps (tiles)'], ['app_launcher', 'App launcher (fixed ids)']] },
   { group: 'Clock', items: [['clock', 'Clock']] },
   { group: 'Weather', items: [['weather', 'Weather']] },
   { group: 'OSD placement', items: [['banner', 'INFO banner'], ['digits', 'Channel digits'], ['popup', 'Message popup']] },
@@ -149,7 +149,8 @@ export function zoneLabel(z) {
     case 'video': return 'LIVE TV';
     case 'channel_list': return 'channel list';
     case 'menu': return `menu (${(z.items || []).length})`;
-    case 'app_launcher': return `apps (${(z.apps || []).length})`;
+    case 'app_launcher': return `app launcher (${(z.apps || []).length})`;
+    case 'apps': return `apps enabled for the group${z.layout === 'grid' ? ' · grid' : ''}`;
     case 'weather': return 'weather';
     case 'html': return 'html page';
     case 'banner': return 'INFO banner position';
@@ -161,7 +162,7 @@ export function zoneLabel(z) {
 
 export function nextZoneId(doc, type) {
   const ids = new Set((doc.zones || []).map((z) => z.id));
-  const base = type === 'channel_list' ? 'chlist' : type === 'app_launcher' ? 'apps' : type;
+  const base = type === 'channel_list' ? 'chlist' : type === 'app_launcher' ? 'launcher' : type;
   if (!ids.has(base)) return base;
   let i = 2;
   while (ids.has(`${base}${i}`)) i++;
@@ -182,6 +183,7 @@ export function newZone(doc, type, at) {
     case 'menu': z = { ...base, w: 420, h: 300, items: [{ label: 'Watch TV', action: 'fullscreen_tv' }, { label: 'Hotel info', action: 'show_page', page: 'info' }], style: { fontSize: 36, color: '#ffffff', highlight: '#ffd166' } }; break;
     case 'html': z = { ...base, w: 1200, h: 700, hidden: true, html: '<h1>Hotel information</h1><p>Breakfast 7–10 in the lobby.</p>', style: { fontSize: 32, color: '#ffffff', background: 'rgba(0,0,0,0.85)', padding: 40 } }; break;
     case 'weather': z = { ...base, w: 360, h: 120, units: 'metric', style: { fontSize: 36, color: '#ffffff' } }; break;
+    case 'apps': z = { ...base, x: 80, y: 760, w: 1760, h: 220, layout: 'row', style: { fontSize: 30, color: '#ffffff', highlight: '#ffd166', tileSize: 200 } }; break;
     case 'app_launcher': z = { ...base, w: 600, h: 200, apps: [{ label: 'Netflix', app_id: 'netflix' }, { label: 'YouTube', app_id: 'youtube.leanback.v4' }], style: { fontSize: 32, color: '#ffffff', highlight: '#ffd166' } }; break;
     case 'banner': z = { ...base, x: 80, y: 880, w: 1200, h: 80, style: { fontSize: 48, color: '#ffffff', background: 'rgba(0,0,0,0.65)', borderRadius: 14 } }; break;
     case 'digits': z = { ...base, x: 1560, y: 60, w: 280, h: 110, style: { fontSize: 72, color: '#ffffff', background: 'rgba(0,0,0,0.65)', borderRadius: 14, align: 'right' } }; break;

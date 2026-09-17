@@ -211,6 +211,12 @@ export default function ZonePanel({ doc, selectedIds = [], onChange, onSelect, s
         <Field label="Layout"><Segmented label="Menu layout" value={zone.layout || 'column'} onChange={(v) => setZ({ layout: v === 'column' ? undefined : v })} options={[['column', 'list'], ['row', 'row']]} /></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'fontWeight', 'color', 'background', 'highlight', 'padding', 'borderRadius', 'opacity']} />
       </>}
+      {zone.type === 'apps' && <>
+        <p className="muted small">Shows the apps enabled for the set's group (Apps page) as tiles: icon + name, remote-navigable, OK launches. Nothing to configure per layout except the look.</p>
+        <Field label="Layout"><Segmented label="Apps layout" value={zone.layout || 'row'} onChange={(v) => setZ({ layout: v })} options={[['row', 'one row'], ['grid', 'grid']]} /></Field>
+        <Field label="Tile size"><Slider value={zone.style && zone.style.tileSize} onChange={(v) => setStyle({ ...(zone.style || {}), tileSize: v })} min={100} max={400} label="Tile size" fallback={200} /></Field>
+        <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'color', 'background', 'highlight', 'padding', 'borderRadius', 'opacity']} />
+      </>}
       {zone.type === 'app_launcher' && <>
         <Field label="Apps" hint="LG app ids, e.g. netflix, youtube.leanback.v4, amazon"><ListEditor items={zone.apps || []} onChange={(apps) => setZ({ apps })} addLabel="Add app" fields={[{ key: 'label', label: 'Label' }, { key: 'app_id', label: 'app id' }]} /></Field>
         <StyleFields style={zone.style} onChange={setStyle} fields={['fontFamily', 'fontSize', 'color', 'background', 'highlight', 'borderRadius']} />

@@ -20,3 +20,12 @@
 .wx-icon{font-size:1.4em}
 .wx-temp{font-weight:bold}
 .wx-text{opacity:.85}
+/* apps zone (B3): tiles */
+.zone.apps-row{display:flex;flex-wrap:nowrap;gap:24px;align-items:flex-start;overflow:hidden}
+.zone.apps-grid{display:flex;flex-wrap:wrap;gap:24px;align-content:flex-start}
+.apptile{flex:none;box-sizing:border-box;border-radius:18px;background:rgba(255,255,255,.12);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;overflow:hidden;transition:transform .12s}
+.apptile.focused{background:rgba(255,255,255,.22);transform:scale(1.06)}
+.appicon{width:45%;height:45%;display:flex;align-items:center;justify-content:center}
+.appicon img{width:100%;height:100%;object-fit:contain}
+.appinitial{font-size:2.2em;font-weight:bold;opacity:.9}
+.appname{font-size:.8em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90%}

@@ -144,6 +144,35 @@ export function drawWeather(e, z, ctx, env) {
   e.appendChild(wrap);
 }
 
+// Enabled apps (server: enabled per group) as remote-navigable tiles. env.apps = [{id,name,icon}];
+// focus like a menu (env.focus.zone === z.id). Tiles without an icon show the name's initial.
+export function appItemsOf(z, env) {
+  return ((env && env.apps) || []).map(function (a) { return { label: a.name || a.id, action: 'launch_app', app_id: a.id, icon: a.icon || null }; });
+}
+export function drawApps(e, z, ctx, env) {
+  e.setAttribute('data-menu', '1');
+  e.setAttribute('data-apps', '1');
+  clear(e);
+  var items = appItemsOf(z, env);
+  var st = z.style || {};
+  var focus = (env && env.focus) || {};
+  var focused = focus.zone === z.id ? focus.index : -1;
+  e.classList.add(z.layout === 'grid' ? 'apps-grid' : 'apps-row');
+  var tile = st.tileSize || (z.layout === 'grid' ? 220 : 200);
+  items.forEach(function (it, i) {
+    var t = el('div', 'apptile' + (i === focused ? ' focused' : ''));
+    t.style.width = tile + 'px'; t.style.height = Math.round(tile * 0.75) + 'px';
+    if (i === focused && st.highlight) { t.style.boxShadow = '0 0 0 6px ' + st.highlight; }
+    var ic = el('div', 'appicon');
+    if (it.icon) { var img = document.createElement('img'); img.src = substitute(it.icon, ctx); img.alt = ''; ic.appendChild(img); }
+    else ic.appendChild(el('span', 'appinitial', String(it.label || '?').charAt(0).toUpperCase()));
+    t.appendChild(ic);
+    t.appendChild(el('div', 'appname', it.label));
+    e.appendChild(t);
+  });
+  if (!items.length) e.appendChild(el('div', 'zone-placeholder', env && env.preview ? 'apps (enable some for the group)' : ''));
+}
+
 export var DRAWERS = {
   text: drawText,
   image: drawImage,
@@ -156,7 +185,8 @@ export var DRAWERS = {
   menu: drawMenu,
   html: drawHtml,
   weather: drawWeather,
-  app_launcher: drawMenu
+  app_launcher: drawMenu,
+  apps: drawApps
 };
 
 // The zones a screen shows, in stacking order. openPage = id of a hidden zone opened by a

@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -47,6 +47,11 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
         case 'idcap://power/powermode/get': ok({ mode: f.powerMode }); break;
         case 'idcap://power/powermode/set': f.powerMode = p.mode; ok(); break;
         case 'idcap://application/launch': f.launched.push(p); ok(); break;
+        case 'idcap://application/list': ok({ list: f.appList || [
+          { id: 'netflix', title: 'Netflix', icon: '/usr/palm/applications/netflix/icon.png', type: 'native' },
+          { id: 'youtube.leanback.v4', title: 'YouTube', icon: '/usr/palm/applications/youtube/icon.png', type: 'web' },
+          { id: 'amazon', title: 'Prime Video', type: 'native' },
+          { id: 'com.webos.app.browser', title: 'Web Browser', type: 'web' }] }); break;
         case 'idcap://procentric/application/launch': f.launched.push({ reload: true }); ok(); break;
         case 'idcap://tv/checkout/request': f.checkedOut = true; ok(); break;
         case 'idcap://network/configuration/get': ok({ wired: { state: 'connected', ipAddress: '10.0.0.5' }, isInternetConnectionAvailable: true }); break;

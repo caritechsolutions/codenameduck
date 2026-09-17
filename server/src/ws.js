@@ -79,6 +79,7 @@ function createHub({ db, tenants, state, log = () => {} }) {
       conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power);
       conn.sent.lineup = JSON.stringify(st.lineup);
       conn.sent.messages = JSON.stringify(st.messages);
+      conn.sent.apps = JSON.stringify(st.apps || []);
     } catch (e) { log(`ws: state build failed for set ${set.id}: ${e.message}`); }
     sendJson(ws, { type: 'hello', set_id: set.id, server_time: new Date().toISOString() });
     // Deliver anything queued while the set was away.
@@ -155,6 +156,12 @@ function createHub({ db, tenants, state, log = () => {} }) {
       if (force || c.sent.messages !== msgKey) {
         c.sent.messages = msgKey;
         sendJson(c.ws, { type: 'messages', messages: st.messages || [] });
+        touched = true;
+      }
+      const appsKey = JSON.stringify(st.apps || []);
+      if (force || c.sent.apps !== appsKey) {
+        c.sent.apps = appsKey;
+        sendJson(c.ws, { type: 'apps', apps: st.apps || [] });
         touched = true;
       }
       if (touched) pushed++;

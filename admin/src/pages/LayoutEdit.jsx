@@ -114,6 +114,7 @@ export default function LayoutEdit() {
   const generalErrors = errors.filter((e) => !/zone "/.test(e));
   const pages = doc.zones.filter((z) => z.hidden);
   const tenant = session && session.tenant;
+  const appChoices = (apps.data || []).map((a) => ({ id: a.app_id, name: a.name, icon: a.icon }));
   return (
     <>
       <div className="topbar">
@@ -151,7 +152,7 @@ export default function LayoutEdit() {
             </div>)}
           {tab === 'preview' && (
             <div className="card" ref={wrapRef}>
-              <LayoutPreview doc={doc} screenId={screenId} width={canvasWidth - 32} tenant={tenant} openPage={openPage || null} />
+              <LayoutPreview doc={doc} screenId={screenId} width={canvasWidth - 32} tenant={tenant} openPage={openPage || null} apps={appChoices} />
               <div className="muted small" style={{ marginTop: 6 }}>Drawn by the TV renderer's own code with sample channels, weather and guest. The live picture is a placeholder; menus show the first item focused.</div>
             </div>)}
           {tab === 'json' && (
@@ -162,7 +163,7 @@ export default function LayoutEdit() {
             </div>)}
         </div>
         <div>
-          <div className="card"><ZonePanel doc={doc} selectedIds={selectedIds} onChange={change} onSelect={setSelectedIds} screenId={screenId} setScreenId={setScreenId} errorsByZone={byZone} apps={apps.data || []} /></div>
+          <div className="card"><ZonePanel doc={doc} selectedIds={selectedIds} onChange={change} onSelect={setSelectedIds} screenId={screenId} setScreenId={setScreenId} errorsByZone={byZone} apps={appChoices} /></div>
           <div className="card" style={{ marginTop: 12 }}>
             <h3>Preview on a set</h3>
             <div className="row">

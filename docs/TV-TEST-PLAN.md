@@ -262,3 +262,29 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
 7. **Preview tab.** Draws with sample channels ("BBC Two" current), weather, guest "Jane",
    room 214; hidden pages can be opened from the "Open page" selector; the fullscreen tab shows
    the video placeholder over the whole canvas. Compare against the set after publishing.
+
+## Phase 3 Part B3 — apps
+
+1. **Discovery.** Power-cycle the set. Journal shows `register … apps=N`. Admin → Apps lists
+   the LG apps (Netflix, YouTube, Prime, browser, …) with the model in "Seen on". Click **Raw**
+   on one row and tell me the exact shape LG returned (keys for id / title / icon) — the server
+   normalises `id|appId|name`, `title|name`, `icon|iconUrl`; if the columns look wrong the
+   raw entry says why. On an HCAP-only set the list comes from
+   `hcap.preloadedApplication.getPreloadedApplicationList` + `hcap.application.getApplicationList`.
+2. **Enable per group.** Tick Netflix and YouTube for the test group. In a layout add an
+   **Apps (tiles)** zone (palette → Menu) and publish: tiles appear on the set at once (WS `apps`
+   push), in the order ticked. Untick one: it disappears live.
+3. **Navigation + launch.** UP/DOWN/LEFT/RIGHT move the highlight across menus and tiles, OK
+   launches with `application/launch { id, params: {}, noSplash: true }`. Netflix must open
+   without LG's splash. If a launch fails, the drawer shows a `tv_error` with LG's message. A
+   `menu` item can target an app too (action "Launch app…", pick from the discovered list).
+4. **Back from the app.** Press EXIT / PORTAL in Netflix: our app is in front again, the HTML5
+   channel resumes (tuner channels: `channel/replay`), keys are re-claimed (CH± work), and the
+   drawer's events show `tv_visibility {hidden:false, resumed:true, away_s}`. Tell me whether
+   the page really got `visibilitychange` while Netflix was in front — if not, LG kept our app
+   running and the pause/resume never fired (harmless but worth knowing).
+5. **Icons.** Apps → Edit → icon from the Media library: the tile shows it. LG's own icon path
+   (`/usr/palm/…`) is recorded but never used (not reachable by the page).
+6. **Checkout vs app sign-ins (document, don't fix yet).** Sign in to Netflix on the set, then
+   Sets → drawer → Checkout. Reopen Netflix: is it signed out? Report yes/no. If no, we look at
+   `tv/checkout/request` parameters and `application/uninstall` + `install` (Part C).

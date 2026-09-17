@@ -20,7 +20,7 @@ function clientIp(req) {
   return req.socket.remoteAddress || null;
 }
 
-function createTvRouter({ db, state, commands, hub, screenshots, weather, log = () => {} }) {
+function createTvRouter({ db, state, commands, hub, screenshots, weather, apps = null, log = () => {} }) {
   const router = express.Router();
   const findSet = db.prepare('SELECT * FROM sets WHERE tenant_id = ? AND serial = ?');
   const findSetById = db.prepare('SELECT * FROM sets WHERE id = ? AND tenant_id = ?');
@@ -70,6 +70,10 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
       set = findSetById.get(set.id, tenant.id);
     })();
 
+    // Apps the set reported (idcap://application/list) → apps table, per model.
+    let appsSeen = 0;
+    if (apps && b.apps) { try { appsSeen = apps.record(tenant, set, b.apps); } catch (e) { log(`${tenant.name}: apps record failed for ${serial}: ${e.message}`); } }
+
     // Admin-assigned room wins: if the TV's own property disagrees, queue a fix (PLATFORM.md §4).
     if (set.room_number && reported !== set.room_number && commands) {
       commands.queue(tenant, set, 'set_property', { key: 'room_number', value: set.room_number }, { dedupe: true });
@@ -82,7 +86,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, log = 
       }
     }
 
-    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}`);
+    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}`);
     res.json({ ...state.build(tenant, set), token: set.token, created });
   });
 

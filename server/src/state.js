@@ -7,7 +7,7 @@ const { rowToApi: channelToApi } = require('./channels');
 const FACTORY_ROOM = /^\[TV\]/i;   // LG factory default room_number is "[TV]<serial>" — never a room
 function isFactoryRoom(v) { return !v || FACTORY_ROOM.test(String(v)); }
 
-function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
+function createStateBuilder(db, { pollIntervalS = 60, apps = null } = {}) {
   const resolveLayout = makeLayoutResolver(db);
   const findGroup = db.prepare('SELECT id, name, instant_power FROM groups WHERE id = ? AND tenant_id = ?');
   const pendingCommands = db.prepare(`SELECT id, type, payload_json FROM commands
@@ -56,6 +56,7 @@ function createStateBuilder(db, { pollIntervalS = 60 } = {}) {
       lineup: lineup.channels,
       lineup_id: lineup.id,
       messages: activeMessages.all({ tenant_id: tenant.id, set_id: set.id, group_id: set.group_id || -1 }),
+      apps: apps ? apps.enabledFor(tenant, set) : [],      // enabled for the set's group: [{id, name, icon}]
       commands: commandsFor(set),
       ws_url: '/ws/tv',
       poll_interval_s: pollIntervalS,

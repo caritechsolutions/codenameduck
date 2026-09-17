@@ -115,6 +115,7 @@ export default function CanvasEditor({ doc, onChange, selectedIds = [], onSelect
               {z.type === 'channel_list' && <div className="chglyph">{[5, 7, 9, 12].map((n) => <div key={n} className={n === 7 ? 'cur' : ''} style={n === 7 && z.style && z.style.highlight ? { background: z.style.highlight, color: '#1a1a1a' } : undefined}>{n} Channel {n}</div>)}</div>}
               {z.type === 'menu' && <div className={'chglyph' + (z.layout === 'row' ? ' row' : '')}>{(z.items || []).map((it, i) => <div key={i}>{it.label}</div>)}</div>}
               {z.type === 'app_launcher' && <div className="chglyph row">{(z.apps || []).map((a, i) => <div key={i}>{a.label}</div>)}</div>}
+              {z.type === 'apps' && <div className="chglyph row tiles">{['Netflix', 'YouTube', 'Prime', '…'].map((n) => <div key={n} className="tile" style={{ width: px((z.style && z.style.tileSize) || 200), height: px(((z.style && z.style.tileSize) || 200) * 0.75) }}>{n}</div>)}</div>}
               {z.type === 'text' && <div className="ctext" style={{ fontWeight: (z.style && z.style.fontWeight) || 'normal' }}>{z.text}</div>}
               {z.type === 'clock' && <div className="ctext">{z.format === 'HH:mm:ss' ? '20:15:30' : z.format && /a/.test(z.format) ? '08:15 PM' : '20:15'}</div>}
               {z.type === 'image' && (z.src && !/\{\{/.test(z.src) ? <img src={z.src} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = 'none'; }} /> : <div className="tvglyph">{z.src ? 'logo' : 'image'}</div>)}

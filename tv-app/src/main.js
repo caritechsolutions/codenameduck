@@ -27,7 +27,8 @@ var state = {
   screen: null, screenStack: [], lineup: [], channel: null, lastChannel: null, tuning: null, videoRect: null,
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
-  bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null
+  bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
+  apps: [], appsReported: null, hiddenAt: null
 };
 
 // ---------------------------------------------------------------- logging
@@ -61,6 +62,7 @@ function authQs() { return '?set_id=' + encodeURIComponent(state.setId) + '&toke
 function register() {
   var body = { api: state.api, app_version: APP_VERSION };
   PROPERTY_KEYS.forEach(function (k) { body[k] = state.props[k]; });
+  if (state.appsReported) body.apps = state.appsReported;   // idcap://application/list result, raw
   return request('POST', '/api/tv/register', body);
 }
 function poll() { return request('GET', '/api/tv/poll' + authQs()); }
@@ -103,13 +105,13 @@ var substitute = draw.substitute, applyStyle = draw.applyStyle, formatClock = dr
 function textContext() { return draw.liveContext(state.context, new Date()); }
 // Live data the shared drawers need (lineup, current channel, menu focus, weather).
 function drawEnv() {
-  return { lineup: state.lineup, currentIndex: currentIndex(), focus: state.focus, weather: state.weather,
+  return { lineup: state.lineup, currentIndex: currentIndex(), focus: state.focus, weather: state.weather, apps: state.apps,
     units: state.context && state.context.units, videoRect: effectiveVideoRect, preview: false };
 }
 
 var RENDERERS = draw.DRAWERS;
 function renderChannelList(e, z) { draw.drawChannelList(e, z, textContext(), drawEnv()); }
-function renderMenu(e, z) { draw.drawMenu(e, z, textContext(), drawEnv()); }
+function renderMenu(e, z) { (z.type === 'apps' ? draw.drawApps : draw.drawMenu)(e, z, textContext(), drawEnv()); }
 function renderWeather(e, z) { draw.drawWeather(e, z, textContext(), drawEnv()); }
 
 function refreshWeather() {
@@ -452,7 +454,12 @@ function doAction(action, arg) {
       if (state.openPage) { state.openPage = null; render(); }
       else if (state.screenStack.length) showScreen(state.screenStack.pop(), false);
       break;
-    case 'launch_app': if (arg && arg.app_id) tv.launchApp(arg.app_id, arg.params).then(null, function (e) { log('launch ' + arg.app_id + ' failed: ' + e.message); }); break;
+    case 'launch_app':
+      if (arg && arg.app_id) {
+        sendEvent('app', { kind: 'launch', app_id: arg.app_id });
+        tv.launchApp(arg.app_id, arg.params, arg.noSplash).then(null, function (e) { reportError('launch', 'launch ' + arg.app_id + ' failed: ' + e.message, { app_id: arg.app_id }); });
+      }
+      break;
     case 'tune': if (arg && arg.number != null) { var c = findChannel(arg.number); if (c) tuneTo(c); } break;
     case 'reload': window.location.reload(); break;
     default: log('unknown action ' + action);
@@ -460,9 +467,9 @@ function doAction(action, arg) {
 }
 function menuZones() {
   var vis = visibleZoneIds();
-  return ((state.layout && state.layout.zones) || []).filter(function (z) { return (z.type === 'menu' || z.type === 'app_launcher') && (!vis || vis[z.id] || state.openPage === z.id) && !(z.hidden && state.openPage !== z.id); });
+  return ((state.layout && state.layout.zones) || []).filter(function (z) { return (z.type === 'menu' || z.type === 'app_launcher' || z.type === 'apps') && (!vis || vis[z.id] || state.openPage === z.id) && !(z.hidden && state.openPage !== z.id); });
 }
-function menuItems(z) { return z.type === 'app_launcher' ? (z.apps || []).map(function (a) { return { label: a.label, action: 'launch_app', app_id: a.app_id }; }) : (z.items || []); }
+function menuItems(z) { return z.type === 'apps' ? draw.appItemsOf(z, drawEnv()) : draw.menuItemsOf(z); }
 function moveFocus(delta) {
   var menus = menuZones();
   if (!menus.length) return false;
@@ -502,8 +509,8 @@ function onKeyDown(ev) {
   else if (keys[name]) doAction(keys[name]);
   else if (name === 'PORTAL' || name === 'GUIDE') doAction('toggle_menu');
   else if (name === 'BACK' || name === 'EXIT') doAction('close_page');
-  else if (name === 'UP') handled = moveFocus(-1);
-  else if (name === 'DOWN') handled = moveFocus(1);
+  else if (name === 'UP' || name === 'LEFT') handled = moveFocus(-1);
+  else if (name === 'DOWN' || name === 'RIGHT') handled = moveFocus(1);
   else if (name === 'ENTER') handled = activateFocus();
   else handled = false;
   if (handled) { ev.preventDefault(); ev.stopPropagation(); }
@@ -548,6 +555,18 @@ function applyLineup(lineup) {
     if (state.lineup.length) tuneStart(z); else { state.channel = null; tv.stopVideo(); refreshChannelList(); }
   }
 }
+function applyApps(apps) {
+  var next = apps || [];
+  if (JSON.stringify(next) === JSON.stringify(state.apps)) return;
+  state.apps = next;
+  log('apps: ' + state.apps.length + ' enabled');
+  var els = stage.querySelectorAll('[data-apps]');
+  for (var i = 0; i < els.length; i++) {
+    var id = els[i].getAttribute('data-zone-id');
+    var z = ((state.layout && state.layout.zones) || []).filter(function (x) { return x.id === id; })[0];
+    if (z) draw.drawApps(els[i], z, textContext(), drawEnv());
+  }
+}
 function applyMessages(messages) {
   state.messages = messages || [];
   var m = state.messages[0];
@@ -558,6 +577,7 @@ function applyState(data) {
   applyLayout(data.layout, state.context);
   applyLineup(data.lineup);
   if (data.messages) applyMessages(data.messages);
+  if (data.apps) applyApps(data.apps);
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
   if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
   if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
@@ -722,6 +742,7 @@ function onWsMessage(msg) {
       break;
     case 'lineup': applyLineup(msg.lineup); break;
     case 'messages': applyMessages(msg.messages); break;
+    case 'apps': applyApps(msg.apps); break;
     case 'command': runCommand(msg.command, ackViaWs); break;
     case 'deleted': log('this set was deleted in admin; re-registering'); state.setId = null; state.token = null; registerLoop(0); break;
     case 'pong': break;
@@ -770,10 +791,38 @@ function readProperties() {
   return p.then(function () { return tv.displayResolution(); }).then(function (osd) { state.osd = osd; })
     .then(function () { return tv.getPowerMode(); }).then(function (pm) { state.powerMode = pm; });
 }
+// Another app (Netflix…) in front: stop our picture so it does not fight the app's; when we
+// are back, resume where we were and claim the remote keys again (LG hands them to the app).
+function pauseForBackground() {
+  if (!state.channel || state.videoPaused) return;
+  state.videoPaused = true;
+  if (isUrlChannel(state.channel)) { if (state.mediaMode === 'html5' && videoEl) { try { videoEl.pause(); } catch (e) {} } else if (state.api) tv.platformMediaStop().then(null, function () {}); }
+  else if (state.api) tv.channelStop().then(null, function (e) { reportError('channel_stop', e.message); });
+  log('hidden: video paused');
+}
+function resumeFromBackground() {
+  var away = state.hiddenAt ? Math.round((Date.now() - state.hiddenAt) / 1000) : null;
+  state.hiddenAt = null;
+  var p = state.api ? tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys re-claimed'); }, function (e) { reportError('keys', 'claim after app: ' + e.message); }) : Promise.resolve();
+  p.then(function () {
+    if (state.videoPaused && state.channel) {
+      var z = ((state.layout && state.layout.zones) || []).filter(function (x) { return x.type === 'video'; })[0];
+      if (z) placeVideo(z); else state.videoPaused = false;
+    }
+    sendEvent('visibility', { hidden: false, resumed: true, away_s: away });
+  });
+}
 function preparePlatform() {
   // Claim the keys the lineup needs; leave VOL/MUTE with the TV firmware. Then make sure the
   // set is on the TV input so no external-input OSD covers the layout.
-  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput);
+  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput).then(readAppList);
+}
+function readAppList() {
+  return tv.listApps().then(function (r) {
+    state.appsReported = r || null;
+    var n = Array.isArray(r) ? r.length : (r && (r.list || r.applications || r.apps || r.appList) ? (r.list || r.applications || r.apps || r.appList).length : '?');
+    log('application/list: ' + n + ' entries');
+  }, function (e) { log('application/list failed: ' + e.message); state.appsReported = null; });
 }
 function boot() {
   fitStage({ w: 1920, h: 1080 });
@@ -786,7 +835,11 @@ function boot() {
   ['play_start', 'play_end', 'buffering_start', 'buffering_end', 'network_changed', 'checkout'].forEach(function (n) { tv.on(n, function () { sendEvent('platform', { kind: n }); }); });
   window.addEventListener('error', function (e) { reportError('js', (e && e.message) || 'script error', { source: e && e.filename, line: e && e.lineno }); });
   tv.on('power_mode_changed', function (ev) { state.powerMode = ev && ev.mode ? String(ev.mode) : state.powerMode; sendEvent('power', { mode: state.powerMode }); });
-  document.addEventListener('visibilitychange', function () { sendEvent('visibility', { hidden: !!document.hidden }); });
+  document.addEventListener('visibilitychange', function () {
+    sendEvent('visibility', { hidden: !!document.hidden });
+    if (document.hidden) { state.hiddenAt = Date.now(); pauseForBackground(); }
+    else resumeFromBackground();
+  });
   tv.detect().then(function (api) {
     state.api = api;
     if (!api) { log('no LG middleware answered; running in browser mode'); return Promise.resolve(); }

@@ -313,3 +313,27 @@ Decisions already made (do not re-open):
   `components/MediaPicker.jsx` (modal: library / `{{logo}}` / URL / upload) used by the image
   zone and the canvas background image in `ZonePanel`; Settings uploads the logo through the
   library and lists old `assets/` files only as "Legacy assets".
+
+### Part B2 — canvas editor UX, shared drawing module, fonts, templates (2026-09-17)
+
+- `shared/zone-draw.js` is the one zone-drawing implementation: `DRAWERS` per type,
+  `zoneElement`, `visibleZones`, `renderStage`, `tick` (clocks + `{{time}}`/`{{date}}`),
+  `substitute`, `liveContext`, `applyStyle` (now also `fontFamily`, `fontStyle`, `valign`,
+  `shadow` = soft/strong/outline or raw). The renderer's `render()` calls `renderStage`; the
+  admin's `editor/LayoutPreview.jsx` calls the same with fake lineup/weather/guest. `shared/zones.css`
+  is the matching stylesheet (build copies it to `dist/zones.css`; admin imports it). The server
+  zone-type test scans `DRAWERS` in the shared module.
+- Renderer: `show_screen` action (`{screen}`) pushes a screen like `fullscreen_tv`; text variables
+  now include `guest_first`, `checkout_date` (blank until PMS), `time`, `date`.
+- Fonts: `tv-app/fonts/*.woff2` (Inter, Roboto, Open Sans, Lato, Montserrat, Oswald, Playfair
+  Display; OFL, Latin subsets, `LICENSES.txt`), `fonts.css` linked by index.html and by the admin
+  (`/procentric/application/fonts/fonts.css`, same hostname). `shared/fonts.json` feeds the picker;
+  `style.fontFamily` is the family name. nginx caches `fonts/` 30 days.
+- Templates: `shared/layout-templates.json` (classic, fullscreen, welcome, info);
+  `GET /api/admin/layout-templates`, `POST /api/admin/layouts {name, template}`.
+- Editor: `editor/geometry.js` (GRID 8, `guideSnap` edges↔edges / centres↔centres, `alignZones`,
+  `distributeZones`, front/back, multi-id `duplicateZone`/`removeZone`, `locked`, `errorsByZone`,
+  action picker helpers), `CanvasEditor` (multi-select, guides, palette drop, click never moves),
+  `Palette`, `EditorToolbar`, `ZonePanel` (typed controls, font picker, variables menu, menu action
+  picker with pages/screens/apps), `LayoutEdit` (Canvas / Preview / Advanced tabs, screen tabs,
+  undo/redo 50, Ctrl-D, Delete, inline errors). `menu.layout: "row"` draws items horizontally.

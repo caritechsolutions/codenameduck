@@ -13,10 +13,12 @@ test('validator accepts every shared zone type; renderer, editor and validator s
   const r = validateLayout({ schema: 1, zones, screens: [] });
   assert.deepEqual(r.errors, [], r.errors.join('; '));
   assert.equal(r.doc.zones.length, SHARED.length);
-  // the renderer registers a drawer for exactly these types (RENDERERS keys in tv-app/src/main.js)
-  const src = fs.readFileSync(path.resolve(__dirname, '../../tv-app/src/main.js'), 'utf8');
-  const block = src.slice(src.indexOf('var RENDERERS = {'), src.indexOf('\n};', src.indexOf('var RENDERERS = {')));
-  const keys = [...block.matchAll(/^  (\w+): function/gm)].map((m) => m[1]);
+  // the shared drawing module (used by the renderer and the admin preview) registers a drawer
+  // for exactly these types (DRAWERS keys in shared/zone-draw.js)
+  const src = fs.readFileSync(path.resolve(__dirname, '../../shared/zone-draw.js'), 'utf8');
+  const block = src.slice(src.indexOf('export var DRAWERS = {'), src.indexOf('\n};', src.indexOf('export var DRAWERS = {')));
+  const keys = [...block.matchAll(/^  (\w+): draw/gm)].map((m) => m[1]);
+  assert.match(fs.readFileSync(path.resolve(__dirname, '../../tv-app/src/main.js'), 'utf8'), /RENDERERS = draw\.DRAWERS/);
   assert.deepEqual(keys.sort(), [...SHARED].sort());
   // the admin editor lists the same
   const geometry = fs.readFileSync(path.resolve(__dirname, '../../admin/src/editor/geometry.js'), 'utf8');

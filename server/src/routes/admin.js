@@ -3,7 +3,7 @@
 // login, requires a session. Tenant-admins are confined to their tenant; superadmins act on
 // whichever tenant's hostname they are using.
 const express = require('express');
-const { validateLayout, starterLayout } = require('../layout');
+const { validateLayout, starterLayout, templateLayout, layoutTemplates } = require('../layout');
 const { isFactoryRoom } = require('../state');
 
 const ONLINE_SQL = `((julianday('now') - julianday(s.last_seen)) * 86400 < 180)`;
@@ -224,10 +224,13 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     if (!l) return res.status(404).json({ error: 'layout not found' });
     res.json(layoutToApi(l));
   });
+  r.get('/layout-templates', (_req, res) => res.json(layoutTemplates()));
   r.post('/layouts', (req, res) => {
     const b = req.body || {};
     const name = String(b.name || '').trim().slice(0, 80) || 'New layout';
-    const { doc, errors } = validateLayout(b.json || starterLayout(name));
+    let base = b.json;
+    if (!base && b.template) { base = templateLayout(String(b.template), name); if (!base) return res.status(400).json({ error: 'unknown template' }); }
+    const { doc, errors } = validateLayout(base || starterLayout(name));
     if (errors.length) return res.status(400).json({ error: 'invalid layout', errors });
     doc.name = name;
     try {

@@ -17,7 +17,8 @@ version += '-' + new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
-for (const f of ['index.html', 'probe.html', 'lib']) cpSync(join(root, f), join(dist, f), { recursive: true });
+for (const f of ['index.html', 'probe.html', 'lib', 'fonts']) cpSync(join(root, f), join(dist, f), { recursive: true });
+cpSync(join(root, '..', 'shared', 'zones.css'), join(dist, 'zones.css'));   // shared with the admin preview
 writeFileSync(join(dist, 'version.txt'), version + '\n');
 
 const opts = {

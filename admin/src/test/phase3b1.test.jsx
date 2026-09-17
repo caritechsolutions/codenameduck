@@ -85,8 +85,8 @@ describe('B1 media library', () => {
     const DOC = { schema: 1, canvas: { w: 1920, h: 1080, background: '#000' }, zones: [{ id: 'pic', type: 'image', x: 0, y: 0, w: 400, h: 300, src: '' }], keys: {}, screens: [{ id: 'home', zones: ['pic'] }] };
     function H() {
       const [doc, setDoc] = React.useState(DOC);
-      const [sel, setSel] = React.useState('pic');
-      return <ToastProvider><ZonePanel doc={doc} selectedId={sel} onChange={setDoc} onSelect={setSel} screenId="home" setScreenId={() => {}} /><pre data-testid="json">{JSON.stringify(doc)}</pre></ToastProvider>;
+      const [sel, setSel] = React.useState(['pic']);
+      return <ToastProvider><ZonePanel doc={doc} selectedIds={sel} onChange={setDoc} onSelect={setSel} screenId="home" setScreenId={() => {}} /><pre data-testid="json">{JSON.stringify(doc)}</pre></ToastProvider>;
     }
     render(<H />);
     fireEvent.click(screen.getByLabelText('Choose image'));

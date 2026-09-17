@@ -230,3 +230,35 @@ says `no-store` and `.../lib/idcap.js` says `immutable`.
    another image → "Use as hotel logo": the badge moves, the zone follows.
 7. **Legacy assets.** hoteldemo's existing `assets/` files keep working (Settings shows them
    under "Legacy assets" only while any exist).
+
+## Phase 3 Part B2 — canvas editor, templates, fonts, in-editor preview
+
+1. **New layout from template.** Layouts → New layout: four template cards with thumbnails
+   (Classic, Full-screen TV with overlay bar, Welcome page with big photo, Info / menu page).
+   Create one of each and assign to the test group: each must draw on the set as the editor's
+   Preview tab shows it (same drawing code). Welcome page: pick a photo for the `photo` zone
+   from the Media library first; "Watch TV" opens the full-screen tuner, BACK returns.
+2. **Fonts on the set.** Classic uses Inter, Full-screen uses Roboto, Welcome uses Playfair
+   Display + Inter, Info uses Montserrat. The set must render them (served from
+   `/procentric/application/fonts/`, check `curl -I http://<host>/procentric/application/fonts/inter.woff2`
+   → 200, `Cache-Control: public, max-age=2592000`). If a family falls back to LG's font, tell me
+   which model/webOS — variable WOFF2 may need static files on old Chromium.
+3. **Variables tick.** A text zone with `{{time}}` / `{{date}}` (Full-screen template bar) must
+   update within a minute without a layout push. `{{guest_first}}` and `{{checkout_date}}` are
+   blank until Part C (PMS) — the Preview tab shows sample values.
+4. **Editor UX (in the browser, no set needed).** Palette drag onto the canvas lands the zone
+   where dropped; shift-click selects several; drag moves them together with magenta guides
+   when edges/centres line up (8 px grid, Alt = free); toolbar align/distribute/front/back;
+   lock (padlock in the label, no move/resize); eye toggles the zone on the current screen;
+   Ctrl-D duplicates; Delete removes; Ctrl-Z / Ctrl-Shift-Z undo/redo up to 50 steps.
+   Property panel: font picker, size slider, B/I, alignment, colour swatches, padding/radius/
+   opacity sliders, text shadow; "Insert variable…" drops `{{…}}` at the caret.
+5. **Screens as tabs.** Tabs above the canvas; "+ screen" adds e.g. `channels`; a menu item's
+   action picker lists "Open page …" (hidden zones), "Go to screen …" and built-ins. On the set:
+   OK on "Go to screen channels" shows that screen, BACK returns to home (screen stack).
+6. **Inline validation.** Advanced tab → change a zone type to `bogus`: a red "!" badge appears
+   on that zone in the canvas and the message in its panel; nothing pops up; Save is disabled
+   until fixed.
+7. **Preview tab.** Draws with sample channels ("BBC Two" current), weather, guest "Jane",
+   room 214; hidden pages can be opened from the "Open page" selector; the fullscreen tab shows
+   the video placeholder over the whole canvas. Compare against the set after publishing.

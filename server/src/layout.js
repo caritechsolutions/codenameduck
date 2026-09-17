@@ -114,23 +114,15 @@ function validateLayout(input) {
 
 function num(v, d) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 
-function starterLayout(name = 'New layout') {
-  return {
-    schema: 1, name,
-    canvas: { w: 1920, h: 1080, background: '#0b1a2a', backgroundImage: null },
-    zones: [
-      { id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675, source: 'lineup', startChannel: 'first' },
-      { id: 'welcome', type: 'text', x: 80, y: 60, w: 1400, h: 90, text: 'Welcome to {{hotel}}', style: { fontSize: 56, fontWeight: 'bold', color: '#ffffff' } },
-      { id: 'room', type: 'text', x: 80, y: 150, w: 600, h: 50, text: 'Room {{room}}', style: { fontSize: 30, color: '#8fb3c9' } },
-      { id: 'chlist', type: 'channel_list', x: 80, y: 240, w: 480, h: 560, style: { fontSize: 28, color: '#ffffff', background: 'rgba(0,0,0,0.35)', highlight: '#ffd166' } },
-      { id: 'clock', type: 'clock', x: 1600, y: 980, w: 240, h: 60, format: 'HH:mm', style: { fontSize: 40, color: '#ffffff', align: 'right' } },
-    ],
-    keys: { PORTAL: 'toggle_menu', BACK: 'close_page' },
-    screens: [
-      { id: 'home', zones: ['tv', 'welcome', 'room', 'chlist', 'clock'] },
-      { id: 'fullscreen', zones: ['tv'] },
-    ],
-  };
+// Starter layouts: shared/layout-templates.json (also shown in the admin's "New layout"
+// dialog). starterLayout() keeps the old name for the "classic" one.
+const TEMPLATES = require('../../shared/layout-templates.json');
+function layoutTemplates() { return TEMPLATES.map((t) => ({ id: t.id, name: t.name, description: t.description, json: t.json })); }
+function templateLayout(id, name = 'New layout') {
+  const t = TEMPLATES.find((x) => x.id === id);
+  if (!t) return null;
+  return { ...JSON.parse(JSON.stringify(t.json)), name };
 }
+function starterLayout(name = 'New layout') { return templateLayout('classic', name); }
 
-module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, ZONE_TYPES };
+module.exports = { unassignedLayout, makeLayoutResolver, validateLayout, starterLayout, templateLayout, layoutTemplates, ZONE_TYPES };

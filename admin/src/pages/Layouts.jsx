@@ -14,8 +14,8 @@ export default function Layouts() {
   const [creating, setCreating] = useState(false);
   const [removing, setRemoving] = useState(null);
 
-  async function create(name) {
-    try { const l = await post('/layouts', { name }); setCreating(false); nav(`/layouts/${l.id}`); } catch (e) { toast(e.message, 'bad'); }
+  async function create(name, template) {
+    try { const l = await post('/layouts', { name, template }); setCreating(false); nav(`/layouts/${l.id}`); } catch (e) { toast(e.message, 'bad'); }
   }
   async function duplicate(l) {
     try { const c = await post(`/layouts/${l.id}/duplicate`); toast(`Created "${c.name}"`); layouts.reload(); } catch (e) { toast(e.message, 'bad'); }
@@ -58,9 +58,22 @@ export default function Layouts() {
 
 function NewLayoutModal({ onCreate, onClose }) {
   const [name, setName] = useState('');
+  const [template, setTemplate] = useState('classic');
+  const templates = useAsync(() => get('/layout-templates'), []);
   return (
-    <Modal title="New layout" onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={!name.trim()} onClick={() => onCreate(name.trim())}>Create</button></>}>
-      <Field label="Name" hint="Starts from a template with live TV, welcome text, channel list and clock."><input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Standard room" /></Field>
+    <Modal title="New layout" onClose={onClose} footer={<><button onClick={onClose}>Cancel</button><button className="primary" disabled={!name.trim()} onClick={() => onCreate(name.trim(), template)}>Create</button></>}>
+      <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Standard room" aria-label="Layout name" /></Field>
+      <Field label="Start from a template">
+        <div className="template-grid" role="radiogroup" aria-label="Template">
+          {(templates.data || []).map((t) => (
+            <label key={t.id} className={'template-card' + (template === t.id ? ' active' : '')}>
+              <input type="radio" name="template" value={t.id} checked={template === t.id} onChange={() => setTemplate(t.id)} aria-label={t.name} />
+              <LayoutThumb doc={t.json} width={150} />
+              <b>{t.name}</b><span className="muted small">{t.description}</span>
+            </label>))}
+          {templates.data && templates.data.length === 0 && <span className="muted small">No templates.</span>}
+        </div>
+      </Field>
     </Modal>
   );
 }

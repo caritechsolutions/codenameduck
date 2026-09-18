@@ -38,58 +38,59 @@ async function open(s, serial, overrides) {
   return { page, key, fake };
 }
 
-test('licence tokens: registered at boot when not authorised, Netflix appears, second boot registers without a command', async (t) => {
+test('licence tokens: registered at boot only for apps whose register/status is not authorised; authorised sets never register', async (t) => {
   if (!browser) { t.skip('chromium unavailable'); return; }
   const s = await setup(t);
-  // first boot: Netflix is a controlled app — not in application/list and unregistered
-  const p1 = await open(s, 'B3C0001', { __hideUntilRegistered: ['netflix'] });
+  // first boot: Netflix is in application/list and reports "unregistered" (as the 43UM670H0UA does)
+  const p1 = await open(s, 'B3C0001', {});
   await p1.page.waitForFunction(() => (window.__fake.registered || []).length >= 1, null, { timeout: 10000 });
   await sleep(600);
   let f = await p1.fake();
-  assert.equal(f.registered.length, 1, 'registered exactly once at boot');
+  assert.equal(f.registered.length, 1, 'registered exactly once at boot (server command and boot path never double up)');
   assert.deepEqual(f.registered[0], { tokenList: [{ id: 'netflix', token: TOKEN }] });
   assert.equal(f.keys.NETFLIX, 1, 'NETFLIX key claimed');
   assert.ok(f.calls.some((c) => c.uri === 'idcap://configuration/servicecountry/get'), 'service country read');
   const lists = f.calls.filter((c) => c.uri === 'idcap://application/list').length;
   assert.ok(lists >= 2, 'application/list re-read after registration: ' + lists);
-  // the server learnt about Netflix from the apps_list event and marks it activated
   await sleep(300);
   let apps = (await s.stack.api('GET', '/api/admin/apps', undefined, s.cookie)).json;
   const nf = apps.find((a) => a.app_id === 'netflix');
-  assert.ok(nf, 'netflix known after registration: ' + apps.map((a) => a.app_id));
+  assert.ok(nf, 'netflix known: ' + apps.map((a) => a.app_id));
   assert.equal(nf.activation, 'activated');
   assert.equal(nf.licensed, true);
   const set = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'B3C0001');
   let detail = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json;
   const types = detail.events.map((e) => e.type);
-  for (const n of ['tv_apps_registration', 'tv_apps_list', 'tv_apps_status', 'tv_service_country']) assert.ok(types.includes(n), n + ' event in ' + types.join(','));
+  for (const n of ['tv_apps_registration', 'tv_apps_registration_reason', 'tv_apps_list', 'tv_apps_status', 'tv_service_country']) assert.ok(types.includes(n), n + ' event in ' + types.join(','));
+  const reason = detail.events.find((e) => e.type === 'tv_apps_registration_reason' && e.payload.trigger !== 'server_register');
+  assert.ok(reason, 'renderer reason event');
+  assert.deepEqual(reason.payload.sending, ['netflix']);
+  assert.equal(reason.payload.apps[0].in_list, true); assert.equal(reason.payload.apps[0].status.status, 'unregistered'); assert.equal(reason.payload.apps[0].activated, false);
+  const regEv = detail.events.find((e) => e.type === 'tv_apps_registration');
+  assert.equal(regEv.payload.ok, true); assert.deepEqual(regEv.payload.results.map((r) => [r.id, r.tokenResult]), [['netflix', 'success']]);
   assert.ok(!types.includes('tv_error'), 'no error for service country NL: ' + JSON.stringify(detail.events.filter((e) => e.type === 'tv_error')));
-  const regCmds = detail.commands.filter((c) => c.type === 'register_apps');
-  assert.ok(regCmds.length <= 1, 'at most one register_apps command queued by the server');
   const results = (await s.stack.api('GET', '/api/admin/apps/activation', undefined, s.cookie)).json.results;
   assert.equal(results.length, 1); assert.equal(results[0].ok, true);
   await p1.page.close();
 
-  // second boot (fresh middleware state, i.e. a factory-reset or re-imaged set): the server no
-  // longer queues a command (it recorded the success) — the renderer registers on its own
-  const p2 = await open(s, 'B3C0001', { __hideUntilRegistered: ['netflix'] });
-  await p2.page.waitForFunction(() => (window.__fake.registered || []).length >= 1, null, { timeout: 10000 });
-  await sleep(400);
+  // second boot with the app now authorised (as after a real activation): nothing is registered,
+  // by the renderer or by the server — that is what kept resetting the Netflix sign-in
+  const p2 = await open(s, 'B3C0001', { __appAuth: {} });
+  await sleep(1500);
   f = await p2.fake();
-  assert.equal(f.registered.length, 1);
+  assert.equal((f.registered || []).length, 0, 'authorised: no application/register on the second boot');
   detail = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json;
-  assert.equal(detail.commands.filter((c) => c.type === 'register_apps').length, regCmds.length, 'no new register_apps command on the second boot');
+  assert.equal(detail.commands.filter((c) => c.type === 'register_apps').length, 1, 'no new register_apps command');
   await p2.page.close();
 
-  // a brand-new set that is already authorised: the renderer's boot path stays quiet; only the
-  // server's one-time register_apps command (B3b, until a success is recorded) runs — once
+  // a brand-new set that is already authorised: no registration at all, no command
   const p3 = await open(s, 'B3C0002', { __appAuth: {} });
   await sleep(1500);
   f = await p3.fake();
+  assert.equal((f.registered || []).length, 0);
   const set2 = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'B3C0002');
   const d2 = (await s.stack.api('GET', `/api/admin/sets/${set2.id}`, undefined, s.cookie)).json;
-  assert.equal((f.registered || []).length, d2.commands.filter((c) => c.type === 'register_apps').length, 'authorised set: registrations == server commands (no boot registration on top)');
-  assert.ok(!(await p3.page.evaluate(() => /registering app licences at boot/.test(document.getElementById('status').textContent))));
+  assert.equal(d2.commands.filter((c) => c.type === 'register_apps').length, 0);
   await p3.page.close();
 });
 

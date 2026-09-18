@@ -415,3 +415,29 @@ The test set must have its room number set in admin (e.g. `101`).
 10. **API (optional).** Settings → PMS API → Generate key, then the curl examples in
     `docs/PMS-API.md`: a `POST` creates a booking visible in the calendar, `PATCH {status:
     "checked_in"}` puts it on the set, without the key → 401.
+
+## Phase 3 Part B3d — registration only when not authorised (Netflix sign-in kept across reboots)
+
+Background: every cold start re-registered all licence tokens (the `airplay` id is never in
+`application/list`, and LG's `tokenResult` is the string `"success"`, which the server read as
+"unknown" and queued `register_apps` again). Re-registering an authorised app resets its
+sign-in. Now a token is registered only for an app whose `register/status` says not authorised.
+
+1. **Sign-in survives reboots.** Sign in to Netflix, BACK to the portal, power-cycle the set
+   twice (cold). Netflix must still be signed in. The set's events show **no**
+   `tv_apps_registration` and **no** `tv_apps_registration_reason`; the drawer has no new
+   `register_apps` command.
+2. **Reason is logged when it does register.** On a set where Netflix reads `unregistered`
+   (Apps → Raw), power-cycle: events show `tv_apps_registration_reason` with per app
+   `in_list`, `status` (LG's raw reply) and `activated`, and `sending: ["netflix"]` — only that
+   token; then `tv_apps_registration` with `results: [{id, tokenResult: "success"}]`. Netflix is
+   still signed in on the *other* sets.
+3. **Failed licence.** App licences → the AirPlay row shows "failed on 43UM670H0UA ·
+   IDCAP_RESULT_FAILURE" and the token is no longer sent to any set (Apps → Activation lists
+   `licensed` without it). Editing its id or dropping a new file clears the mark.
+4. **Amazon.** Prime Video registers and launches on the 43UM670H0UA (LG's "STB-6500 only" note
+   is wrong for this set); confirm once more after the change that it is still activated.
+5. **Boot channel error gone.** With an HLS-only lineup (start channel disabled) power-cycle:
+   the drawer no longer shows `channel_changed IDCAP_RESULT_FAILURE` as the last error; the
+   events list has a `tv_channel_event {ignored: true}` instead. A real tune failure on a tuner
+   channel still reports `tv_error`.

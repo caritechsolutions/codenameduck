@@ -163,8 +163,23 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
     return n;
   }
   function statusOf(set) { return statusForSet.all(set.id); }
-  function recordRegistration(tenant, set, { ok, result }) {
-    upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(result == null ? null : result).slice(0, 4000));
+  // The set's registration report: ok (all tokens succeeded), result (first raw LG event) and
+  // results (one per token: {id, tokenResult "success"|"fail", errorMessage}). A "fail" marks the
+  // licence so it is not retried until it is edited.
+  function recordRegistration(tenant, set, { ok, result, results }) {
+    upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(results && results.length ? { ok, results } : (result == null ? null : result)).slice(0, 4000));
+    if (licences && Array.isArray(results)) {
+      for (const r of results) {
+        if (r && r.id && /^fail/i.test(String(r.tokenResult ?? '')) ) licences.markFailed(r.id, set.model, r.errorMessage || r.detail || null);
+      }
+    }
+  }
+  // Licensed apps this set itself reported as not authorised (register/status) — the only reason
+  // to register a token (re-registering an authorised app resets its sign-in on the set).
+  function unauthorizedLicensed(set) {
+    if (!set || !set.id || !licences) return [];
+    const lic = new Set(licences.tokens().map((t) => t.id));
+    return statusForSet.all(set.id).filter((r) => r.activated === 0 && lic.has(r.app_id)).map((r) => r.app_id);
   }
   function hasRegistered(set) { const r = regForSet.get(set.id); return !!(r && r.ok === 1); }
   function activationResults(tenant) {
@@ -175,7 +190,7 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
   function activationConfig(tenant) {
     const st = tenantSettings(tenant.id);
     const c = st.app_activation && typeof st.app_activation === 'object' ? st.app_activation : {};
-    return { accountNumber: c.accountNumber ? String(c.accountNumber) : '', licensed: licences ? licences.list().map((l) => l.app_id) : [] };
+    return { accountNumber: c.accountNumber ? String(c.accountNumber) : '', licensed: licences ? licences.tokens().map((l) => l.id) : [] };   // tokens actually offered (failed ones excluded)
   }
   function setActivationConfig(tenant, { accountNumber }) {
     const row = db.prepare('SELECT settings_json FROM tenants WHERE id = ?').get(tenant.id);
@@ -186,16 +201,19 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
   }
   // Payload for application/register (register_apps command + boot registration): every stored
   // licence token as tokenList [{id, token}], plus the tenant's accountNumber when set.
-  function registerPayload(tenant) {
+  // {tokenList, accountNumber} for a set. onlyIds restricts the tokens (server-side auto-queue
+  // sends just the apps the set reported as not authorised); failed licences are never included.
+  function registerPayload(tenant, onlyIds = null) {
     const p = {};
-    const toks = licences ? licences.tokens() : [];
+    let toks = licences ? licences.tokens() : [];
+    if (Array.isArray(onlyIds)) toks = toks.filter((t) => onlyIds.includes(t.id));
     if (toks.length) p.tokenList = toks;
     const cfg = activationConfig(tenant);
     if (cfg.accountNumber) p.accountNumber = cfg.accountNumber;
     return Object.keys(p).length ? p : null;
   }
   return { record, list, get, updateOverrides, remove, setGroupApps, enabledFor, normalizeAppList, normalizeAuth,
-    recordStatus, statusOf, recordRegistration, hasRegistered, activationResults, activationConfig, setActivationConfig, registerPayload };
+    recordStatus, statusOf, recordRegistration, hasRegistered, unauthorizedLicensed, activationResults, activationConfig, setActivationConfig, registerPayload };
 }
 
 module.exports = { createAppStore, normalizeAppList, normalizeAuth };

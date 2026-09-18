@@ -126,7 +126,7 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
         const tenant = findTenant.get(tenantId);
         if (name === 'tv_apps_status') apps.recordStatus(tenant, { id: setId }, payload.status);
         else if (name === 'tv_apps_list') apps.record(tenant, findSet.get(setId, tenantId) || { id: setId }, payload.apps);
-        else apps.recordRegistration(tenant, { id: setId }, { ok: payload.ok, result: payload.result });
+        else apps.recordRegistration(tenant, findSet.get(setId, tenantId) || { id: setId }, { ok: payload.ok, result: payload.result, results: payload.results });
         refresh(tenantId, { setIds: [setId] });
       } catch (e) { log(`apps status for set ${setId} failed: ${e.message}`); }
     }

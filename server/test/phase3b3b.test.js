@@ -58,16 +58,12 @@ test('activation: status per set hides un-activated apps from that set only; adm
   assert.ok(reg, 'register_apps queued'); assert.deepEqual(reg.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }] });
   assert.equal((await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: {} })).json.queued, 3);
   assert.equal((await s.call('GET', `/api/admin/sets/${a.json.set_id}`, { cookie })).json.commands.filter((x) => x.type === 'register_apps' && x.status === 'queued').length, 1, 'deduped while queued');
-  // a brand-new set gets the registration at its first register
-  const d = await s.registerSet('D', { apps: LIST });
-  assert.ok(d.json.commands.some((x) => x.type === 'register_apps'));
-
   // over WS: A reports the registration result and fresh status → Netflix appears in A's apps push
   const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${a.json.set_id}&token=${a.json.token}`, { headers: { Host: 'hoteldemo.caritech.net' } });
   const msgs = []; ws.on('message', (m) => msgs.push(JSON.parse(m.toString())));
   await new Promise((r) => ws.once('open', r));
   await new Promise((r) => setTimeout(r, 100));
-  ws.send(JSON.stringify({ type: 'event', name: 'apps_registration', payload: { ok: true, result: { result: true } } }));
+  ws.send(JSON.stringify({ type: 'event', name: 'apps_registration', payload: { ok: true, result: { id: 'netflix', tokenResult: 'success' }, results: [{ id: 'netflix', tokenResult: 'success', ok: true }] } }));
   ws.send(JSON.stringify({ type: 'event', name: 'apps_status', payload: { status: { netflix: { status: 'registered' } } } }));
   await new Promise((r) => setTimeout(r, 200));
   const push = msgs.filter((m) => m.type === 'apps').pop();
@@ -79,6 +75,33 @@ test('activation: status per set hides un-activated apps from that set only; adm
   // A registering again does not get another register_apps (it succeeded)
   const a2 = await s.registerSet('A', { apps: LIST });
   assert.ok(!a2.json.commands.some((x) => x.type === 'register_apps' && x.id !== reg.id), 'no new registration for a set that succeeded');
+  // a brand-new set gets the registration at its first register — only when its own
+  // register/status says a licensed app is not authorised, and only that app's token (B3d)
+  const d = await s.registerSet('D', { apps: LIST, apps_status: { netflix: { status: 'unregistered' }, amazon: { status: 'registered' } } });
+  const dReg = d.json.commands.find((x) => x.type === 'register_apps');
+  assert.ok(dReg, 'queued for the unauthorised app'); assert.deepEqual(dReg.payload.tokenList.map((x) => x.id), ['netflix']);
+  const e = await s.registerSet('E', { apps: LIST, apps_status: { netflix: { status: 'registered' } } });
+  assert.ok(!e.json.commands.some((x) => x.type === 'register_apps'), 'authorised set: nothing queued');
+  const e2 = await s.registerSet('E2', { apps: LIST });
+  assert.ok(!e2.json.commands.some((x) => x.type === 'register_apps'), 'no status at all (HCAP-like): nothing queued — absence is never a reason');
+  const dEvents = (await s.call('GET', `/api/admin/sets/${d.json.set_id}`, { cookie })).json.events;
+  const reason = dEvents.find((x) => x.type === 'tv_apps_registration_reason');
+  assert.ok(reason); assert.equal(reason.payload.trigger, 'server_register'); assert.deepEqual(reason.payload.sending, ['netflix']);
+
+  // LG answers "fail" for a token: the licence is marked (model, message) and left out of every payload until edited
+  await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'AirPlay_caritech.lic', content: 'QUlSUExBWS10b2tlbi0xMjM0NTY3OA==' }] } });
+  assert.deepEqual((await s.call('GET', '/api/admin/apps/activation', { cookie })).json.config.licensed, ['airplay', 'netflix']);
+  ws.send(JSON.stringify({ type: 'event', name: 'apps_registration', payload: { ok: false, results: [{ id: 'airplay', tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE', ok: false }] } }));
+  await new Promise((r) => setTimeout(r, 200));
+  const lics = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences;
+  const ap = lics.find((l) => l.app_id === 'airplay');
+  assert.deepEqual([ap.failed.model, ap.failed.message], ['43UM670H0UA', 'IDCAP_RESULT_FAILURE']);
+  assert.deepEqual((await s.call('GET', '/api/admin/apps/activation', { cookie })).json.config.licensed, ['netflix'], 'failed licence not offered');
+  assert.ok(s.logs.some((l) => /licences: airplay registration FAILED on 43UM670H0UA: IDCAP_RESULT_FAILURE/.test(l)));
+  const renamed = await s.call('PATCH', `/api/admin/licences/${ap.id}`, { cookie, body: { app_id: 'com.apple.airplay' } });
+  assert.equal(renamed.json.failed, null, 'editing the id clears the failure');
+  assert.deepEqual((await s.call('GET', '/api/admin/apps/activation', { cookie })).json.config.licensed, ['com.apple.airplay', 'netflix']);
+  await s.call('DELETE', `/api/admin/licences/${ap.id}`, { cookie });
   // an account number on top of the tokens; without any licence the payload is the account number alone
   const acc = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: 'ACC-9' } });
   assert.equal(acc.json.config.accountNumber, 'ACC-9');

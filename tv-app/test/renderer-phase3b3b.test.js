@@ -58,7 +58,7 @@ test('activation: status reported, un-activated app hidden, register_apps comman
   assert.ok(detail.events.some((e) => e.type === 'tv_apps_registration'));
   assert.ok(detail.events.some((e) => e.type === 'tv_apps_status'));
   const act = (await stack.api('GET', '/api/admin/apps/activation', undefined, cookie)).json;
-  assert.equal(act.results.length, 1); assert.equal(act.results[0].ok, true); assert.equal(act.results[0].result.tokenResult, true);   // LG's documented field (docs/lg/netflix.md)
+  assert.equal(act.results.length, 1); assert.equal(act.results[0].ok, true); assert.equal(act.results[0].result.results[0].tokenResult, 'success');   // LG's real field: the string "success"/"fail"
   apps = (await stack.api('GET', '/api/admin/apps', undefined, cookie)).json;
   assert.equal(apps.find((a) => a.app_id === 'netflix').activation, 'activated');
   await page.close();

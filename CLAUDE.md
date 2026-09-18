@@ -485,3 +485,27 @@ Decisions already made (do not re-open):
   message is kept in `cc_checkout_note`, ack `{checkout, reload}`, then `tv.reloadApp()` after
   1.5 s; on boot the note is shown once as a popup. Whether LG's checkout signs Netflix out is a
   hardware check (TV test plan Part C, step 5).
+
+### Part B3d — token registration only when not authorised (2026-09-18)
+
+- Hardware facts (43UM670H0UA): `application_registration_result_received` fires **once per
+  token** with `tokenResult` = the string `"success"` / `"fail"` (+ `errorMessage`), not a
+  boolean. Re-registering an already authorised app **resets its sign-in** (Netflix lost its
+  account on every reboot). `amazon` registers and launches on this set despite LG's "STB-6500
+  only" note. `airplay` answers `"fail"` — the real AirPlay app id is unknown (ask LG).
+- Rule: a token is registered only for an app whose `register/status` reports not authorised.
+  Never because an id is absent from `application/list`, never for an authorised app. Applies to
+  the renderer boot path (`bootRegisterApps`), the `register_apps` command (`registrationPlan()`
+  filters the payload; nothing left → ack `{ok:true, skipped}` without calling LG) and the
+  server's auto-queue at register (`apps.unauthorizedLicensed(set)` from the set's own
+  `apps_status`; payload = those tokens only via `registerPayload(tenant, onlyIds)`).
+- Evidence: `apps_registration_reason` event (`trigger boot|command|server_register`, per app
+  `{id, in_list, status (raw), activated}`, `sending`, `skipped`). `apps_registration` carries
+  `results: [{id, tokenResult, errorMessage, ok}]`; `ok` = all success / any fail / null.
+  Renderer `registerApps()` waits for one event per token (3 s grace after the first, 20 s cap).
+- Migration 013: `licences.failed_model/failed_at/failed_message`. `licences.markFailed()` on a
+  `"fail"` result (hub → `apps.recordRegistration` with the set's model); failed rows are left
+  out of `tokens()` until `put` (replace) or `setAppId` clears them; App licences page shows
+  "failed on <model>". `hasRegistered()` is no longer used for queuing.
+- Renderer ignores a failed `channel_changed` while no tuner channel is selected (LG fires one
+  at boot when the start channel is disabled): `channel_event {ignored:true}` instead of `tv_error`.

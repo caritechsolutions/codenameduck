@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}, serviceCountry: ${JSON.stringify(overrides.__serviceCountry === undefined ? 'NL' : overrides.__serviceCountry)}, hideUntilRegistered: ${JSON.stringify(overrides.__hideUntilRegistered || [])}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}, serviceCountry: ${JSON.stringify(overrides.__serviceCountry === undefined ? 'NL' : overrides.__serviceCountry)}, hideUntilRegistered: ${JSON.stringify(overrides.__hideUntilRegistered || [])}, tokenResults: ${JSON.stringify(overrides.__tokenResults || {})}
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -52,11 +52,16 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
         case 'idcap://application/register/status': ok({ id: p.id, status: (f.appAuth || {})[p.id] || 'registered' }); break;
         case 'idcap://application/register': {
           f.registered = (f.registered || []).concat([p]);
-          if (p.tokenList) p.tokenList.forEach(function (t) { f.appAuth = f.appAuth || {}; f.appAuth[t.id] = 'registered'; });
-          if (p.accountNumber) { f.appAuth = {}; }
+          // Real 43UM670H0UA: one application_registration_result_received per token, tokenResult
+          // is the string "success" / "fail" (docs/lg/netflix.md wrongly implied a boolean).
+          var tr = f.tokenResults || {};
+          if (p.tokenList) p.tokenList.forEach(function (t, i) {
+            var res = tr[t.id] || 'success';
+            if (res === 'success') { f.appAuth = f.appAuth || {}; f.appAuth[t.id] = 'registered'; }
+            setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', res === 'success' ? { id: t.id, tokenResult: 'success' } : { id: t.id, tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE' }); }, 30 + i * 20);
+          });
+          if (p.accountNumber) { f.appAuth = {}; setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', { id: 'account', tokenResult: 'success' }); }, 30); }
           ok();
-          // LG's documented event shape (docs/lg/netflix.md): { id, tokenResult, errorMessage }
-          setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', { id: p.tokenList ? p.tokenList.map(function (t) { return t.id; }).join(',') : 'account', tokenResult: true }); }, 30);
           break;
         }
         case 'idcap://application/list': ok({ list: (f.appList || [

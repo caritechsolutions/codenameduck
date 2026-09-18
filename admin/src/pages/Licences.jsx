@@ -8,7 +8,7 @@ import { timeAgo } from '../util.js';
 // the SI partner, so they are stored once for all tenants — encrypted at rest with
 // /srv/coopcentric/data/secret.key — and every set registers them at boot when LG's
 // application/register/status says it is not authorised. Only the last 6 characters are shown.
-const HINT = { netflix: 'NETFLIX_*.lic', amazon: 'AMAZON_*.lic (STB-6500 / webOS 5.0 only)', airplay: 'AirPlay_*.lic — id is our guess, confirm against application/list', googlecast: 'GOOGLE CAST_*.lic — id is our guess, confirm against application/list' };
+const HINT = { netflix: 'NETFLIX_*.lic', amazon: 'AMAZON_*.lic — LG says STB-6500 only, but it registers and launches on the 43UM670H0UA too', airplay: 'AirPlay_*.lic — LG answered "fail" for the id airplay on the 43UM670H0UA; the real id is unknown, ask LG', googlecast: 'GOOGLE CAST_*.lic — id is our guess, confirm against application/list' };
 
 function readText(file) {
   return new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result || '')); r.onerror = () => reject(new Error(`cannot read ${file.name}`)); r.readAsText(file); });
@@ -55,7 +55,7 @@ export default function Licences() {
   return (
     <>
       <div className="topbar"><h1>App licences</h1><span className="muted small">shared by all tenants</span></div>
-      <p className="muted small">Drop the <code>.lic</code> files LG sent with the SI contract. Each file is one token; the app is recognised from the file name (NETFLIX_, AMAZON_, AirPlay_, GOOGLE CAST_). Tokens are stored encrypted (key in <code>/srv/coopcentric/data/secret.key</code>) and never shown again in full. Every set registers all stored tokens at boot when LG reports the app as not authorised; the <b>Register now</b> button on a tenant's Apps page uses the same store. Netflix additionally needs a <b>Netflix hotel id</b> in each tenant's Settings.</p>
+      <p className="muted small">Drop the <code>.lic</code> files LG sent with the SI contract. Each file is one token; the app is recognised from the file name (NETFLIX_, AMAZON_, AirPlay_, GOOGLE CAST_). Tokens are stored encrypted (key in <code>/srv/coopcentric/data/secret.key</code>) and never shown again in full. A set registers a token only for an app whose <code>register/status</code> says it is not authorised (re-registering an authorised app signs its guest out — verified on the 43UM670H0UA); a token LG answers <b>fail</b> for is marked here and left alone until you edit its id or replace the file. the <b>Register now</b> button on a tenant's Apps page uses the same store. Netflix additionally needs a <b>Netflix hotel id</b> in each tenant's Settings.</p>
       <div className={'lic-drop' + (drag ? ' drag' : '')} data-testid="licence-drop"
         onDragOver={(e) => { e.preventDefault(); if (!drag) setDrag(true); }} onDragLeave={() => setDrag(false)}
         onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer && e.dataTransfer.files); }}>
@@ -72,6 +72,7 @@ export default function Licences() {
                   <input list="lic-app-ids" value={ids[r.id] === undefined ? r.app_id : ids[r.id]} aria-label={`app id for ${r.filename}`}
                     onChange={(e) => setIds({ ...ids, [r.id]: e.target.value })} onBlur={() => saveId(r)} onKeyDown={(e) => { if (e.key === 'Enter') saveId(r); }} style={{ width: 160 }} />
                   {HINT[r.app_id] && <div className="muted small">{HINT[r.app_id]}</div>}
+                  {r.failed && <div className="pill bad" title={r.failed.message || ''} data-testid="licence-failed">failed on {r.failed.model || '?'}{r.failed.message ? ` · ${r.failed.message}` : ''} · not retried until the id is edited or the file replaced</div>}
                 </td>
                 <td><code className="small">{r.filename}</code></td>
                 <td><code className="small" title="only the last 6 characters are kept in the clear">…{r.tail}</code></td>

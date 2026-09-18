@@ -74,10 +74,16 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
     let appsSeen = 0;
     if (apps && b.apps) { try { appsSeen = apps.record(tenant, set, b.apps); } catch (e) { log(`${tenant.name}: apps record failed for ${serial}: ${e.message}`); } }
     if (apps && b.apps_status) { try { apps.recordStatus(tenant, set, b.apps_status); } catch (e) { log(`${tenant.name}: apps status failed for ${serial}: ${e.message}`); } }
-    // Licence tokens / account number on file and this set never registered them → do it now.
+    // Licence tokens on file for an app this set just reported as NOT authorised → register those
+    // tokens (only those: re-registering an authorised app resets its sign-in on the set, and an
+    // app missing from application/list is never a reason). Failed licences are skipped.
     if (apps && commands) {
-      const payload = apps.registerPayload(tenant);
-      if (payload && !apps.hasRegistered(set)) commands.queue(tenant, set, 'register_apps', payload, { dedupe: true });
+      const need = apps.unauthorizedLicensed(set);
+      const payload = need.length ? apps.registerPayload(tenant, need) : null;
+      if (payload && payload.tokenList) {
+        hub.recordTvEvent(tenant.id, set.id, { name: 'apps_registration_reason', payload: { trigger: 'server_register', apps: need.map((id) => ({ id, status: 'not authorised (register/status)' })), sending: payload.tokenList.map((t) => t.id) } });
+        commands.queue(tenant, set, 'register_apps', payload, { dedupe: true });
+      }
     }
     // Netflix preflight (docs/lg/netflix.md): the LG service country must not be "Others"/ZZ.
     const country = b.service_country == null ? null : (typeof b.service_country === 'object' ? (b.service_country.country || b.service_country.code || b.service_country.value || JSON.stringify(b.service_country)) : String(b.service_country));

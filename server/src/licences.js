@@ -60,9 +60,10 @@ function createLicenceStore(db, { dataDir = null, log = () => {} } = {}) {
   const qByApp = db.prepare('SELECT * FROM licences WHERE app_id = ?');
   const qById = db.prepare('SELECT * FROM licences WHERE id = ?');
   const ins = db.prepare('INSERT INTO licences (app_id, filename, token_enc, token_tail) VALUES (?, ?, ?, ?)');
-  const upd = db.prepare(`UPDATE licences SET filename = ?, token_enc = ?, token_tail = ?, uploaded_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`);
+  const upd = db.prepare(`UPDATE licences SET filename = ?, token_enc = ?, token_tail = ?, uploaded_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), failed_model = NULL, failed_at = NULL, failed_message = NULL WHERE id = ?`);
 
-  const toApi = (r) => ({ id: r.id, app_id: r.app_id, filename: r.filename, tail: r.token_tail, uploaded_at: r.uploaded_at });
+  const toApi = (r) => ({ id: r.id, app_id: r.app_id, filename: r.filename, tail: r.token_tail, uploaded_at: r.uploaded_at,
+    failed: r.failed_model || r.failed_at ? { model: r.failed_model, at: r.failed_at, message: r.failed_message } : null });
   function list() { return qAll.all().map(toApi); }
   // Add or replace the token for an app. Returns {row, replaced}.
   function put({ filename, content, app_id }) {
@@ -82,17 +83,29 @@ function createLicenceStore(db, { dataDir = null, log = () => {} } = {}) {
     const v = String(appId || '').trim().toLowerCase().slice(0, 100);
     if (!v) { const e = new Error('app id required'); e.status = 400; throw e; }
     if (qByApp.get(v) && qByApp.get(v).id !== r.id) { const e = new Error(`a licence for ${v} already exists`); e.status = 409; throw e; }
-    db.prepare('UPDATE licences SET app_id = ? WHERE id = ?').run(v, r.id);
+    db.prepare('UPDATE licences SET app_id = ?, failed_model = NULL, failed_at = NULL, failed_message = NULL WHERE id = ?').run(v, r.id);   // editing the id re-enables registration
     return toApi(qById.get(r.id));
   }
   function remove(id) { return db.prepare('DELETE FROM licences WHERE id = ?').run(Number(id)).changes > 0; }
-  // Decrypted tokens for the sets: [{id, token}].
-  function tokens() {
+  // Decrypted tokens for the sets: [{id, token}]. Licences LG answered "fail" for are left out
+  // until they are replaced or renamed (includeFailed lists them anyway).
+  function tokens({ includeFailed = false } = {}) {
     const out = [];
-    for (const r of qAll.all()) { try { out.push({ id: r.app_id, token: decrypt(r.token_enc) }); } catch (e) { log(`licences: cannot decrypt token for ${r.app_id}: ${e.message}`); } }
+    for (const r of qAll.all()) {
+      if (!includeFailed && (r.failed_model || r.failed_at)) continue;
+      try { out.push({ id: r.app_id, token: decrypt(r.token_enc) }); } catch (e) { log(`licences: cannot decrypt token for ${r.app_id}: ${e.message}`); }
+    }
     return out;
   }
-  return { list, put, setAppId, remove, tokens, appIdForFilename, KNOWN_IDS, encrypt, decrypt };
+  // LG's application_registration_result_received said tokenResult "fail" for this app.
+  function markFailed(appId, model, message) {
+    const r = qByApp.get(String(appId || '').toLowerCase());
+    if (!r) return null;
+    db.prepare(`UPDATE licences SET failed_model = ?, failed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), failed_message = ? WHERE id = ?`).run(String(model || 'unknown model').slice(0, 80), message == null ? null : String(message).slice(0, 300), r.id);
+    log(`licences: ${r.app_id} registration FAILED on ${model || '?'}${message ? ': ' + message : ''} — not retried until the token or id is edited`);
+    return toApi(qById.get(r.id));
+  }
+  return { list, put, setAppId, remove, tokens, markFailed, appIdForFilename, KNOWN_IDS, encrypt, decrypt };
 }
 
 module.exports = { createLicenceStore, appIdForFilename, isTokenish, KNOWN_IDS };

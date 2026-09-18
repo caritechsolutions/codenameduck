@@ -163,3 +163,94 @@ test('state_version: monotonic per tenant, in register/poll answers, WS pushes a
   assert.ok(p2.state_version >= push.state_version);
   ws.close();
 });
+
+// ---- Part D4: the activation payload (tokens + status_ids) on every path, and why tokens can be missing ----
+
+const NFX = 'TkZYLXRva2VuLWZvci1kNC10ZXN0LTAxMjM0NTY3ODk=';
+
+test('D4: register/poll/WS answers carry activation tokens when the tenant comes from X-CC-Tenant (foreign origin)', async (t) => {
+  const s = await startServer(); t.after(s.close);
+  const { cookie } = await s.login();
+  await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: NFX }] } });
+  await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: '' } });
+  // The bundled app on the 43UM670H0UA runs from http://127.0.0.1:8051 (a loopback HTTP server on
+  // the TV): Host and Origin are that address, the tenant is named only by the header.
+  const foreign = { host: '127.0.0.1:8051', headers: { 'X-CC-Tenant': 'hoteldemo.caritech.net', Origin: 'http://127.0.0.1:8051' } };
+  const r = await s.call('POST', '/api/tv/register', { ...foreign, body: { serial_number: 'BUNDLED1', api: 'idcap', model_name: '43UM670H0UA', origin: 'http://127.0.0.1:8051', bundle_version: 3, source: 'bundle' } });
+  assert.equal(r.status, 200, r.text);
+  const act = r.json.activation;
+  assert.ok(act, 'activation present');
+  assert.deepEqual(act.tokenList, [{ id: 'netflix', token: NFX }], 'the licence token is in the register answer');
+  assert.ok(act.status_ids.includes('netflix'));
+  assert.equal(act.withheld, undefined, 'nothing withheld');
+  // identical to the Host-resolved answer
+  const viaHost = await s.call('POST', '/api/tv/register', { body: { serial_number: 'BUNDLED1', api: 'idcap', model_name: '43UM670H0UA' } });
+  assert.deepEqual(viaHost.json.activation, act);
+  // poll with the header
+  const p = await s.call('GET', `/api/tv/poll?set_id=${r.json.set_id}&token=${viaHost.json.token}`, foreign);
+  assert.equal(p.status, 200, p.text); assert.deepEqual(p.json.activation, act);
+  // WS hello with the tenant in the query
+  const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${r.json.set_id}&token=${viaHost.json.token}&tenant=hoteldemo.caritech.net`, { headers: { Host: '127.0.0.1:8051', Origin: 'http://127.0.0.1:8051' } });
+  const hello = await new Promise((resolve, reject) => { ws.once('message', (m) => resolve(JSON.parse(m.toString()))); ws.once('error', reject); });
+  assert.equal(hello.type, 'hello');
+  ws.close();
+  assert.ok(!s.logs.some((l) => /withheld/.test(l)), 'no withheld line in the journal');
+});
+
+test('D4: a failed licence is withheld for a backoff window (with the reason in the payload), not for ever; success clears it', async (t) => {
+  let clock = new Date('2026-09-18T10:00:00Z');
+  const s = await startServer({ now: () => clock }); t.after(s.close);
+  const { cookie } = await s.login();
+  await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: NFX }] } });
+  const reg = await s.registerSet('TV1', { api: 'idcap', model_name: '43UM670H0UA' });
+  let token = reg.json.token;   // every register answer issues a fresh set token
+  const auth = () => `set_id=${reg.json.set_id}&token=${token}`;
+  const fail = async (id) => { const r = await s.call('POST', `/api/tv/events?${auth()}`, { body: { events: [{ name: 'apps_registration', payload: { ok: false, results: [{ id, tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE', ok: false }] } }] } }); assert.equal(r.status, 200, r.text); };
+  const activation = async () => { const r = await s.call('POST', '/api/tv/register', { body: { serial_number: 'TV1', api: 'idcap', model_name: '43UM670H0UA' } }); token = r.json.token; return r.json.activation; };
+
+  await fail('netflix');
+  // the symptom seen on the set: status_ids present, tokenList absent — now with the reason attached
+  let a = await activation();
+  assert.equal(a.tokenList, undefined); assert.deepEqual(a.status_ids, ['netflix']);
+  assert.equal(a.withheld.length, 1); assert.equal(a.withheld[0].id, 'netflix');
+  assert.match(a.withheld[0].reason, /failed on 43UM670H0UA at 2026-09-18T10:00:00.000Z: IDCAP_RESULT_FAILURE — retried after 2026-09-18T11:00:00.000Z/);
+  assert.equal(a.withheld[0].retry_at, '2026-09-18T11:00:00.000Z');
+  assert.ok(s.logs.some((l) => /hoteldemo: licence token\(s\) withheld from TV1: netflix \(failed on 43UM670H0UA/.test(l)), s.logs.join('\n'));
+  let lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.deepEqual([lic.failed.count, lic.failed.retry_at, lic.readable], [1, '2026-09-18T11:00:00.000Z', true]);
+  // 1 h later the token is offered again
+  clock = new Date('2026-09-18T11:00:01Z');
+  a = await activation();
+  assert.deepEqual(a.tokenList, [{ id: 'netflix', token: NFX }]); assert.equal(a.withheld, undefined);
+  // a second consecutive failure doubles the window (2 h)
+  await fail('netflix');
+  lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.deepEqual([lic.failed.count, lic.failed.retry_at], [2, '2026-09-18T13:00:01.000Z']);
+  clock = new Date('2026-09-18T12:30:00Z'); assert.equal((await activation()).tokenList, undefined, 'still inside the 2 h window');
+  clock = new Date('2026-09-18T13:00:02Z'); assert.ok((await activation()).tokenList, 'offered after the window');
+  // a "success" clears the failure at once
+  await fail('netflix');
+  assert.equal((await activation()).tokenList, undefined);
+  await s.call('POST', `/api/tv/events?${auth()}`, { body: { events: [{ name: 'apps_registration', payload: { ok: true, results: [{ id: 'netflix', tokenResult: 'success', ok: true }] } }] } });
+  lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.equal(lic.failed, null); assert.ok((await activation()).tokenList);
+  assert.ok(s.logs.some((l) => /licences: netflix registered successfully — failure cleared/.test(l)));
+  // the window is capped at 24 h
+  const { retryAt } = require('../src/licences');
+  assert.equal(retryAt({ failed_at: '2026-09-18T10:00:00.000Z', failed_count: 9 }), '2026-09-19T10:00:00.000Z');
+});
+
+test('D4: an undecryptable licence is withheld with a "cannot decrypt" reason and flagged in the admin list', async (t) => {
+  const s = await startServer(); t.after(s.close);
+  const { cookie } = await s.login();
+  await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: NFX }] } });
+  // simulate a secret.key change: a blob encrypted with another key
+  const { createLicenceStore } = require('../src/licences');
+  const other = createLicenceStore(s.db, { dataDir: null });   // fresh in-memory key, same table
+  s.db.prepare("UPDATE licences SET token_enc = ? WHERE app_id = 'netflix'").run(other.encrypt(NFX));
+  const a = (await s.registerSet('TV9', { api: 'idcap' })).json.activation;
+  assert.equal(a.tokenList, undefined); assert.deepEqual(a.status_ids, ['netflix']);
+  assert.match(a.withheld[0].reason, /cannot decrypt/);
+  const lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.equal(lic.readable, false);
+});

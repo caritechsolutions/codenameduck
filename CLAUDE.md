@@ -601,3 +601,26 @@ Decisions already made (do not re-open):
   not_authorised}` without closing the door. `saveCache()` keeps the last known `activation` when
   an answer lacks tokens; `tv_boot` lists `activation.tokens` / `status_ids` the boot state had.
   The fake middleware now answers `authNeeded` (LG's word) for an unregistered app.
+
+### Part D4 — activation tokens on every path, licence failure backoff, local origin (2026-09-18)
+
+- Hardware: a bundled set booting *online* (origin `http://127.0.0.1:8051`, tenant via
+  `X-CC-Tenant`) got `status_ids` but no `tokenList` from the server. The tenant-resolution path is
+  not involved: `state.build()` → `apps.registerPayload(tenant)` is the same for Host, header and
+  WS query (test `D4: register/poll/WS answers carry activation tokens … X-CC-Tenant`). The only way
+  to get `status_ids` without `tokenList` is `licences.tokens()` leaving rows out: a licence marked
+  **failed** (B3d rule: withheld until edited) or a blob that no longer decrypts (`secret.key`
+  changed). Both were invisible to the set and the admin.
+- Fix: migration 016 `licences.failed_count`. A "fail" now withholds the token for a **backoff
+  window** (1 h, then 2 h, 4 h … capped at 24 h; `licences.retryAt(row)`), a `"success"` result
+  clears the failure (`licences.clearFailed`, called from `apps.recordRegistration`), editing the id
+  or replacing the file still clears it at once. `licences.list()` rows carry `failed.count`,
+  `failed.retry_at`, `readable` (decryptable). `registerPayload()` adds `withheld:
+  [{id, reason, retry_at}]` for every licence not in `tokenList`; the register route logs
+  `licence token(s) withheld from <serial>: …`. Renderer: the token-less
+  `apps_registration_reason` and `tv_boot.activation` carry `withheld`. Licences page shows
+  "retried after <time>" / "cannot decrypt".
+- Local bundle origin on the 43UM670H0UA (webOS 8.3): **`http://127.0.0.1:8051`** — LG serves the
+  unzipped app from a loopback HTTP server on the set. Whether the port is stable across boots
+  decides whether `localStorage.cc_state` survives (TV plan D4 step 15); the server-side test uses
+  that origin verbatim.

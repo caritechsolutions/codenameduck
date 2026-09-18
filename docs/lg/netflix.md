@@ -95,3 +95,17 @@ already authorised app resets its state. With registration driven by `register/s
 `authNeeded` (register the token), `authSuccess` (activated), `notRequired` (no token for this
 app). LG's checkout (`tv/checkout/request`) is what signs the guest out — Part C uses it at
 check-out.
+
+## Licence failure handling (D4, 2026-09-18)
+
+A `tokenResult: "fail"` for a token marks the licence row failed (model, time, message) and the
+token is **withheld for a backoff window** — 1 h after the first failure, doubling per consecutive
+failure, capped at 24 h — then offered again. A `"success"` clears the failure; editing the app
+id or replacing the file clears it at once. Reason: a "fail" during a power cut or an offline test
+must not switch Netflix off for good (that is what happened after the Part D offline tests: the
+server kept `status_ids` but sent no `tokenList`). The sets see the reason in
+`activation.withheld` and report it in `tv_apps_registration_reason`.
+
+Local origin of the remote-deploy bundle on the 43UM670H0UA (webOS 8.3): `http://127.0.0.1:8051`
+— the set serves the unzipped app from a loopback HTTP server. Port stability across boots is
+still to be verified (TV test plan D4 step 15).

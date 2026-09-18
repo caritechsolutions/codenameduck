@@ -41,8 +41,22 @@ function loadOrCreateKey(dataDir, log) {
   }
 }
 
-function createLicenceStore(db, { dataDir = null, log = () => {} } = {}) {
+// A token LG answered "fail" for is withheld for a while, not for ever: 1 h after the first
+// failure, doubling per consecutive failure, capped at 24 h (D4). A transient failure (set offline,
+// LG's service unreachable during a power cut) heals itself; a wrong app id costs one register
+// call per window. A "success" result or an edit clears the failure.
+const RETRY_BASE_MS = 60 * 60 * 1000, RETRY_MAX_MS = 24 * 60 * 60 * 1000;
+function retryAt(row) {
+  if (!row || !row.failed_at) return null;
+  const t = Date.parse(row.failed_at);
+  if (!Number.isFinite(t)) return null;
+  const n = Math.max(1, Number(row.failed_count) || 1);
+  return new Date(t + Math.min(RETRY_MAX_MS, RETRY_BASE_MS * Math.pow(2, n - 1))).toISOString();
+}
+
+function createLicenceStore(db, { dataDir = null, log = () => {}, now = () => new Date() } = {}) {
   const key = loadOrCreateKey(dataDir, log);
+  const nowMs = () => { const n = now(); return n instanceof Date ? n.getTime() : new Date(n).getTime(); };
   const encrypt = (plain) => {
     const iv = crypto.randomBytes(12);
     const c = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -60,10 +74,12 @@ function createLicenceStore(db, { dataDir = null, log = () => {} } = {}) {
   const qByApp = db.prepare('SELECT * FROM licences WHERE app_id = ?');
   const qById = db.prepare('SELECT * FROM licences WHERE id = ?');
   const ins = db.prepare('INSERT INTO licences (app_id, filename, token_enc, token_tail) VALUES (?, ?, ?, ?)');
-  const upd = db.prepare(`UPDATE licences SET filename = ?, token_enc = ?, token_tail = ?, uploaded_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), failed_model = NULL, failed_at = NULL, failed_message = NULL WHERE id = ?`);
+  const upd = db.prepare(`UPDATE licences SET filename = ?, token_enc = ?, token_tail = ?, uploaded_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), failed_model = NULL, failed_at = NULL, failed_message = NULL, failed_count = 0 WHERE id = ?`);
 
+  const readable = (r) => { try { decrypt(r.token_enc); return true; } catch { return false; } };
   const toApi = (r) => ({ id: r.id, app_id: r.app_id, filename: r.filename, tail: r.token_tail, uploaded_at: r.uploaded_at,
-    failed: r.failed_model || r.failed_at ? { model: r.failed_model, at: r.failed_at, message: r.failed_message } : null });
+    failed: r.failed_model || r.failed_at ? { model: r.failed_model, at: r.failed_at, message: r.failed_message, count: Number(r.failed_count) || 1, retry_at: retryAt(r) } : null,
+    readable: readable(r) });   // false = secret.key no longer matches the stored blob → replace the file
   function list() { return qAll.all().map(toApi); }
   // Add or replace the token for an app. Returns {row, replaced}.
   function put({ filename, content, app_id }) {
@@ -83,29 +99,56 @@ function createLicenceStore(db, { dataDir = null, log = () => {} } = {}) {
     const v = String(appId || '').trim().toLowerCase().slice(0, 100);
     if (!v) { const e = new Error('app id required'); e.status = 400; throw e; }
     if (qByApp.get(v) && qByApp.get(v).id !== r.id) { const e = new Error(`a licence for ${v} already exists`); e.status = 409; throw e; }
-    db.prepare('UPDATE licences SET app_id = ?, failed_model = NULL, failed_at = NULL, failed_message = NULL WHERE id = ?').run(v, r.id);   // editing the id re-enables registration
+    db.prepare('UPDATE licences SET app_id = ?, failed_model = NULL, failed_at = NULL, failed_message = NULL, failed_count = 0 WHERE id = ?').run(v, r.id);   // editing the id re-enables registration
     return toApi(qById.get(r.id));
   }
   function remove(id) { return db.prepare('DELETE FROM licences WHERE id = ?').run(Number(id)).changes > 0; }
-  // Decrypted tokens for the sets: [{id, token}]. Licences LG answered "fail" for are left out
-  // until they are replaced or renamed (includeFailed lists them anyway).
+  // Why a licence is not offered right now: inside its retry window after a "fail", or its blob
+  // cannot be decrypted (secret.key changed). null = offered.
+  function withheldReason(r) {
+    if (r.failed_at) {
+      const until = retryAt(r);
+      if (until && Date.parse(until) > nowMs()) return { reason: `failed on ${r.failed_model || '?'} at ${r.failed_at}${r.failed_message ? ': ' + r.failed_message : ''} — retried after ${until}`, retry_at: until };
+    }
+    if (!readable(r)) return { reason: 'cannot decrypt the stored token (secret.key changed?) — replace the .lic file', retry_at: null };
+    return null;
+  }
+  // Decrypted tokens for the sets: [{id, token}]. Licences inside their failure window (see
+  // retryAt) and unreadable ones are left out; includeFailed ignores the window.
   function tokens({ includeFailed = false } = {}) {
     const out = [];
     for (const r of qAll.all()) {
-      if (!includeFailed && (r.failed_model || r.failed_at)) continue;
+      if (!includeFailed && r.failed_at && withheldReason(r) && withheldReason(r).retry_at) continue;
       try { out.push({ id: r.app_id, token: decrypt(r.token_enc) }); } catch (e) { log(`licences: cannot decrypt token for ${r.app_id}: ${e.message}`); }
     }
+    return out;
+  }
+  // [{id, reason, retry_at}] for every licence tokens() leaves out — goes down to the sets in the
+  // activation payload so a boot without tokens explains itself.
+  function withheld() {
+    const out = [];
+    for (const r of qAll.all()) { const w = withheldReason(r); if (w) out.push({ id: r.app_id, ...w }); }
     return out;
   }
   // LG's application_registration_result_received said tokenResult "fail" for this app.
   function markFailed(appId, model, message) {
     const r = qByApp.get(String(appId || '').toLowerCase());
     if (!r) return null;
-    db.prepare(`UPDATE licences SET failed_model = ?, failed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), failed_message = ? WHERE id = ?`).run(String(model || 'unknown model').slice(0, 80), message == null ? null : String(message).slice(0, 300), r.id);
-    log(`licences: ${r.app_id} registration FAILED on ${model || '?'}${message ? ': ' + message : ''} — not retried until the token or id is edited`);
-    return toApi(qById.get(r.id));
+    const count = r.failed_at ? (Number(r.failed_count) || 1) + 1 : 1;
+    db.prepare(`UPDATE licences SET failed_model = ?, failed_at = ?, failed_message = ?, failed_count = ? WHERE id = ?`).run(String(model || 'unknown model').slice(0, 80), new Date(nowMs()).toISOString(), message == null ? null : String(message).slice(0, 300), count, r.id);
+    const row = qById.get(r.id);
+    log(`licences: ${r.app_id} registration FAILED on ${model || '?'}${message ? ': ' + message : ''} (failure ${count}) — retried after ${retryAt(row)}`);
+    return toApi(row);
   }
-  return { list, put, setAppId, remove, tokens, markFailed, appIdForFilename, KNOWN_IDS, encrypt, decrypt };
+  // A "success" result clears the failure (and its backoff).
+  function clearFailed(appId) {
+    const r = qByApp.get(String(appId || '').toLowerCase());
+    if (!r || !r.failed_at) return false;
+    db.prepare('UPDATE licences SET failed_model = NULL, failed_at = NULL, failed_message = NULL, failed_count = 0 WHERE id = ?').run(r.id);
+    log(`licences: ${r.app_id} registered successfully — failure cleared`);
+    return true;
+  }
+  return { list, put, setAppId, remove, tokens, withheld, markFailed, clearFailed, retryAt, appIdForFilename, KNOWN_IDS, encrypt, decrypt };
 }
 
-module.exports = { createLicenceStore, appIdForFilename, isTokenish, KNOWN_IDS };
+module.exports = { createLicenceStore, appIdForFilename, isTokenish, retryAt, KNOWN_IDS };

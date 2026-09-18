@@ -107,6 +107,9 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
       }
     }
 
+    // D4: say in the journal when a licence on file is not being offered to this set
+    const withheld = apps ? ((apps.registerPayload(tenant) || {}).withheld || []) : [];
+    if (withheld.length) log(`${tenant.name}: licence token(s) withheld from ${serial}: ${withheld.map((w) => `${w.id} (${w.reason})`).join('; ')}`);
     log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}${country != null ? ` country=${country}` : ''}${b.origin ? ` origin=${String(b.origin).slice(0, 80)}` : ''}${b.bundle_version != null ? ` bundle=v${b.bundle_version}` : ''}`);
     res.json({ ...state.build(tenant, set), token: set.token, created });
   });

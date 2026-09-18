@@ -733,7 +733,7 @@ function offlineFirst() {
     } else state.source = 'none';
     sendEvent('boot', { origin: (window.location && window.location.origin) || null, protocol: window.location && window.location.protocol, href: window.location && String(window.location.href).slice(0, 200),
       source: state.source, state_source: state.source, state_version: state.stateVersion, cache_version: cached ? cv : null, bundle_state_version: bundled ? bv : null, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt,
-      activation: state.activation ? { tokens: (state.activation.tokenList || []).map(function (t) { return t.id; }), status_ids: state.activation.status_ids || [] } : null });
+      activation: state.activation ? { tokens: (state.activation.tokenList || []).map(function (t) { return t.id; }), status_ids: state.activation.status_ids || [], withheld: state.activation.withheld || [] } : null });
   });
 }
 
@@ -1135,7 +1135,7 @@ function bootRegisterApps() {
     if (st) sendEvent('apps_status', { status: st });
     if (!hasTokens) {   // account-number registration is admin-triggered only; no tokens here means "wait for a state that has them"
       var need = ids.filter(function (id) { return statusActivated((st || {})[id]) !== true; });
-      sendEvent('apps_registration_reason', { trigger: 'boot', source: state.source, skipped: 'no licence tokens in the ' + (state.source || 'current') + ' state', not_authorised: need, apps: ids.map(function (id) { return { id: id, status: st ? st[id] : null, activated: statusActivated((st || {})[id]) }; }) });
+      sendEvent('apps_registration_reason', { trigger: 'boot', source: state.source, skipped: 'no licence tokens in the ' + (state.source || 'current') + ' state', not_authorised: need, withheld: a.withheld || [], apps: ids.map(function (id) { return { id: id, status: st ? st[id] : null, activated: statusActivated((st || {})[id]) }; }) });
       return null;
     }
     return registerAndRefresh({ tokenList: tokens }, 'boot', true).then(function (res) {

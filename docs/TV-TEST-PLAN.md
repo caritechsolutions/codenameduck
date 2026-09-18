@@ -532,3 +532,32 @@ library has at least the logo; a layout with a video zone, a text zone with `{{h
     list is empty, the cache/bundle had no licences — tell me which `state_source` it was.
 12. **Sign-in still survives.** With Netflix authorised, two more cold boots (server up or down):
     no `tv_apps_registration`, Netflix still signed in.
+
+### Part D4 — tokens on the header-resolved path, failure backoff, local origin
+
+Background: on the online boot from the bundle the server's answer had `status_ids` but no
+`tokenList`. The path (`X-CC-Tenant`) is not the cause — a server test now boots exactly like the
+set (Host/Origin `http://127.0.0.1:8051`, tenant in the header) and gets the token. Tokens are
+missing only when the licence store withholds them: after a `"fail"` result (until D4: for ever,
+until the row was edited) or when the stored blob no longer decrypts. Both reasons now travel with
+the payload and appear in the journal, and a failure is retried after 1 h (doubling to 24 h).
+
+13. **Why the token was missing.** With the service running, power-cycle the set (online). In the
+    drawer, the boot's `tv_apps_registration_reason` either has `sending: ["netflix", …]` (a token
+    arrived) or `skipped: "no licence tokens …"` with a **`withheld`** list naming each licence and
+    the reason (`failed on 43UM670H0UA at … — retried after …` or `cannot decrypt …`).
+    `journalctl -u coopcentric | grep withheld` shows the same line at register. Superadmin → App
+    licences shows the failed pill with the retry time, or a red "cannot decrypt" pill — **tell me
+    which of the two it is.** A "cannot decrypt" means `/srv/coopcentric/data/secret.key` changed
+    since the upload: replace the .lic files. A failed row is retried on the first boot after the
+    time shown; Replace (or editing the id) retries at once.
+14. **Netflix comes back.** Once the token is offered again: `tv_apps_registration` with
+    `tokenResult: "success"`, the licence row loses its failed pill (the journal says
+    `registered successfully — failure cleared`), Netflix launches and stays signed in across a
+    reboot (no further `tv_apps_registration`).
+15. **Local origin is stable?** Three cold boots of the bundled set with the service up. In each
+    boot's `tv_boot` event compare `origin` (last seen `http://127.0.0.1:8051`) and
+    `cache_version`. If the port is the same every time and `state_source` reads `cache` from the
+    second boot on, localStorage survives and the cache path works in deploy mode. If the port
+    changes, `cache_version` is null on every boot and only the bundle's `state.json` serves an
+    offline boot — **send me the three origins.**

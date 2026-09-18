@@ -43,7 +43,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   syncTenantsFromDisk(db, tenantsDir, logger);
   migrateStoredLayouts(db, logger);
   const tenants = createTenantResolver(db, tenantsDir, logger);
-  const licences = createLicenceStore(db, { dataDir, log: logger });
+  const licences = createLicenceStore(db, { dataDir, log: logger, now });
   const apps = createAppStore(db, { log: logger, licences });
   const pms = createPms(db, { log: logger, now });
   const state = createStateBuilder(db, { pollIntervalS, apps, pms });

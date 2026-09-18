@@ -174,7 +174,9 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
     upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(results && results.length ? { ok, results } : (result == null ? null : result)).slice(0, 4000));
     if (licences && Array.isArray(results)) {
       for (const r of results) {
-        if (r && r.id && /^fail/i.test(String(r.tokenResult ?? '')) ) licences.markFailed(r.id, set.model, r.errorMessage || r.detail || null);
+        if (!r || !r.id) continue;
+        if (/^fail/i.test(String(r.tokenResult ?? ''))) licences.markFailed(r.id, set.model, r.errorMessage || r.detail || null);
+        else if (r.ok === true || /^success$/i.test(String(r.tokenResult ?? ''))) licences.clearFailed(r.id);
       }
     }
   }
@@ -220,6 +222,11 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
     const ids = new Set((licences ? licences.list() : []).map((l) => l.app_id));
     if (cfg.accountNumber) for (const id of ['netflix', 'amazon']) ids.add(id);
     if (ids.size) p.status_ids = [...ids];
+    // Licences on file that are NOT in tokenList right now, with the reason (failure window /
+    // undecryptable) — so a set that boots without tokens can say why (D4).
+    const w = licences ? licences.withheld() : [];
+    if (w.length) p.withheld = Array.isArray(onlyIds) ? w.filter((x) => onlyIds.includes(x.id)) : w;
+    if (p.withheld && !p.withheld.length) delete p.withheld;
     return Object.keys(p).length ? p : null;
   }
   return { record, list, get, updateOverrides, remove, setGroupApps, enabledFor, normalizeAppList, normalizeAuth,

@@ -55,7 +55,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
           // application/list.
           var a = f.appAuth || {};
           var known = (f.appList || [{ id: 'netflix' }, { id: 'youtube.leanback.v4' }, { id: 'amazon' }, { id: 'com.webos.app.browser' }]).some(function (x) { return x.id === p.id; });
-          if (p.id in a) ok({ id: p.id, auth: a[p.id] === 'registered', auth_status: a[p.id] === 'registered' ? 'authSuccess' : 'authFail' });
+          if (p.id in a) ok({ id: p.id, auth: a[p.id] === 'registered', auth_status: a[p.id] === 'registered' ? 'authSuccess' : 'authNeeded' });
           else if (known) ok({ id: p.id, auth: true, auth_status: 'notRequired' });
           else fail('IDCAP_RESULT_FAILURE');
           break;

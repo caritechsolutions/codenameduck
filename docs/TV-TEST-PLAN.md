@@ -521,3 +521,14 @@ library has at least the logo; a layout with a video zone, a text zone with `{{h
 10. **Newer bundle wins.** Edit the layout again, Publish bundle, stop the service, power-cycle:
     `tv_boot` shows `state_source: "bundle"` only if the bundle's `state_version` is higher than
     the cache's (after an app update LG wipes localStorage, so the fresh bundle wins by itself).
+
+### Part D3 — Netflix activation with the server down
+
+11. **Offline boot registers.** Server stopped, set whose Netflix reads `authNeeded`: power-cycle.
+    When the service is back the drawer shows, from that boot, `tv_apps_status` (authNeeded), one
+    `tv_apps_registration_reason` with `trigger: boot` and `sending: ["netflix", …]`, one
+    `tv_apps_registration` per boot with `tokenResult: "success"`, and `tv_boot.activation.tokens`
+    naming the tokens the cache or bundle carried. If `tv_boot.activation` is null or its `tokens`
+    list is empty, the cache/bundle had no licences — tell me which `state_source` it was.
+12. **Sign-in still survives.** With Netflix authorised, two more cold boots (server up or down):
+    no `tv_apps_registration`, Netflix still signed in.

@@ -191,3 +191,66 @@ test('a layout pushed live is drawn on the next offline boot; a newer bundle ove
   assert.ok(boots.some((b) => b.payload.state_source === 'server' || b.payload.state_source === 'none' || b.payload.state_source === 'cache'));
   await ctx.close();
 });
+
+test('offline boot from the bundle with authNeeded → exactly one application/register before the apps zone shows; same from the cache', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  const s = await setup(t);
+  // enable an app for a group so the apps zone has something to hold back
+  const layout = (await s.stack.api('GET', `/api/admin/layouts/${s.layoutId}`, undefined, s.cookie)).json;
+  const withApps = { ...layout.json, zones: [...layout.json.zones, { id: 'apps', type: 'apps', x: 80, y: 700, w: 1700, h: 180, layout: 'row' }], pages: layout.json.pages.map((p) => (p.id === 'home' ? { ...p, zones: [...p.zones, 'apps'] } : p)) };
+  await s.stack.api('PUT', `/api/admin/layouts/${s.layoutId}`, { name: layout.name, json: withApps }, s.cookie);
+  await s.stack.api('POST', '/api/admin/deployment/publish', {}, s.cookie);
+  const stateJson = JSON.parse(require('fs').readFileSync(require('path').join(s.stack.appDir, 'state.json'), 'utf8'));
+  assert.deepEqual(stateJson.activation.tokenList.map((x) => x.id), ['netflix'], 'tokens ride in state.json');
+  assert.deepEqual(stateJson.activation.status_ids, ['netflix']);
+  // 1. cold boot, server unreachable: netflix hidden from the list and authNeeded
+  s.stack.setOffline(true);
+  let ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  let page = await ctx.newPage();
+  await page.addInitScript(fakeIdcap('D0005', { __hideUntilRegistered: ['netflix'] }));   // default appAuth: netflix unregistered → auth:false, authNeeded
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.source === 'bundle' && window.__cc.state.bootRegistered && !window.__cc.state.appsHold, null, { timeout: 15000 });
+  let f = await fake(page);
+  assert.equal(f.calls.filter((c) => c.uri === 'idcap://application/register').length, 1, 'exactly one application/register with the server down');
+  assert.deepEqual(f.registered[0], { tokenList: [{ id: 'netflix', token: 'TkZYLXRva2VuLWZvci1vZmZsaW5lLXRlc3Q=' }] });
+  assert.equal(f.appAuth.netflix, 'registered');
+  const statusQ = f.calls.filter((c) => c.uri === 'idcap://application/register/status').map((c) => c.p.id);
+  assert.deepEqual([...new Set(statusQ)], ['netflix'], 'status asked for the licensed id only, offline too');
+  // order: status → register → list + status re-read, all before the hold was released
+  const idx = (uri, last) => { const xs = f.calls.map((c, i) => [c.uri, i]).filter(([u]) => u === uri).map(([, i]) => i); return last ? xs[xs.length - 1] : xs[0]; };
+  assert.ok(idx('idcap://application/register/status') < idx('idcap://application/register') && idx('idcap://application/list', true) > idx('idcap://application/register'));
+  await ctx.close();
+  // 2. cached boot: register online first (fake already authorised so nothing registers), then the
+  //    set forgets its activation (LG reset) and boots offline from the cache → one registration
+  s.stack.setOffline(false);
+  ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  page = await ctx.newPage();
+  await page.addInitScript(fakeIdcap('D0006', { __appAuth: {} }));
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.online === true && window.__cc.state.bootRegistered && !window.__cc.state.appsHold, null, { timeout: 15000 });
+  assert.equal((await fake(page)).calls.filter((c) => c.uri === 'idcap://application/register').length, 0, 'authorised: nothing registered online');
+  const cached = await page.evaluate(() => JSON.parse(localStorage.getItem('cc_state')));
+  assert.deepEqual(cached.activation.tokenList.map((x) => x.id), ['netflix'], 'tokens are in the cache');
+  await page.close();
+  page = await ctx.newPage();   // same context → same localStorage; a fresh fake that says authNeeded again
+  await page.addInitScript(fakeIdcap('D0006', { __hideUntilRegistered: ['netflix'] }));
+  s.stack.setOffline(true);
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.source === 'cache' && window.__cc.state.bootRegistered && !window.__cc.state.appsHold, null, { timeout: 15000 });
+  f = await fake(page);
+  assert.equal(f.calls.filter((c) => c.uri === 'idcap://application/register').length, 1, 'exactly one application/register from the cached boot');
+  assert.deepEqual(f.registered[0].tokenList.map((x) => x.id), ['netflix']);
+  // back online: the queued evidence reaches the server — reason (boot, from cache) + registration
+  s.stack.setOffline(false);
+  await page.evaluate(() => window.__cc.registerNow());
+  await page.waitForFunction(() => window.__cc.state.online === true && window.__cc.state.ws && window.__cc.state.ws.readyState === 1, null, { timeout: 15000 });
+  const set = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'D0006');
+  let ev = [];
+  for (let i = 0; i < 40 && !ev.some((e) => e.type === 'tv_apps_registration'); i++) { await sleep(250); ev = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json.events; }
+  const reg = ev.find((e) => e.type === 'tv_apps_registration');
+  assert.ok(reg && reg.payload.trigger === 'boot' && reg.payload.results[0].tokenResult === 'success', JSON.stringify(reg && reg.payload));
+  const boot = ev.find((e) => e.type === 'tv_boot' && e.payload.state_source === 'cache');
+  assert.ok(boot && boot.payload.activation && boot.payload.activation.tokens[0] === 'netflix', 'tv_boot names the tokens the cache carried');
+  assert.equal((await s.stack.api('GET', '/api/admin/apps', undefined, s.cookie)).json.find((a) => a.app_id === 'netflix').activation, 'activated');
+  await ctx.close();
+});

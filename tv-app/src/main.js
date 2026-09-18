@@ -647,6 +647,8 @@ function applyState(data, opts) {
 function saveCache(data) {
   try {
     var copy = {}; for (var k in data) if (k !== 'commands') copy[k] = data[k];
+    // the licence tokens must survive in the cache: an answer without them (older server, error) keeps the last known set
+    if (!(copy.activation && Array.isArray(copy.activation.tokenList) && copy.activation.tokenList.length)) { var prev = loadCache(); if (prev && prev.activation && Array.isArray(prev.activation.tokenList) && prev.activation.tokenList.length) copy.activation = prev.activation; }
     copy.set_id = state.setId; copy.token = state.token; copy.saved_at = new Date().toISOString(); copy.tenant_host = API.tenant || null;
     copy.state_version = Math.max(Number(data.state_version) || 0, Number(state.stateVersion) || 0);
     state.stateVersion = copy.state_version;
@@ -730,7 +732,8 @@ function offlineFirst() {
       showStatus(false);
     } else state.source = 'none';
     sendEvent('boot', { origin: (window.location && window.location.origin) || null, protocol: window.location && window.location.protocol, href: window.location && String(window.location.href).slice(0, 200),
-      source: state.source, state_source: state.source, state_version: state.stateVersion, cache_version: cached ? cv : null, bundle_state_version: bundled ? bv : null, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt });
+      source: state.source, state_source: state.source, state_version: state.stateVersion, cache_version: cached ? cv : null, bundle_state_version: bundled ? bv : null, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt,
+      activation: state.activation ? { tokens: (state.activation.tokenList || []).map(function (t) { return t.id; }), status_ids: state.activation.status_ids || [] } : null });
   });
 }
 
@@ -1114,18 +1117,27 @@ function statusActivated(raw) {
 // Boot activation, once per boot, in this order: register/status for every licensed id →
 // register the tokens of those not authorised (one at a time) → re-read list + status → events.
 // The apps zone is held empty until it is done. The register_apps command waits for it too.
+// Runs from whichever state arrives first with tokens — cache, bundled state.json or the server —
+// and exactly once per boot. A state without tokens (an old cache, a bundle built without
+// licences) reads the status and says so, but leaves the door open for the next state.
 function bootRegisterApps() {
   var a = state.activation;
-  if (!a || state.bootRegistered || state.api !== 'idcap') return;
-  state.bootRegistered = true;
+  if (!a || state.bootRegistered || state.bootPromise || state.api !== 'idcap') return;
   var ids = licensedIds();
   var tokens = Array.isArray(a.tokenList) ? a.tokenList : [];
   if (!ids.length) return;
+  var hasTokens = tokens.length > 0;
+  if (hasTokens) state.bootRegistered = true;
   state.appsHold = true;
   var release = function () { state.appsHold = false; state.bootPromise = null; if (state.pendingApps) { var pa = state.pendingApps; state.pendingApps = null; applyApps(pa); } };
+  log('boot activation from ' + (state.source || '?') + ': ' + ids.length + ' licensed id(s), ' + tokens.length + ' token(s)');
   state.bootPromise = readAppStatus(ids).then(function (st) {
     if (st) sendEvent('apps_status', { status: st });
-    if (!tokens.length) return null;   // account-number registration is admin-triggered only
+    if (!hasTokens) {   // account-number registration is admin-triggered only; no tokens here means "wait for a state that has them"
+      var need = ids.filter(function (id) { return statusActivated((st || {})[id]) !== true; });
+      sendEvent('apps_registration_reason', { trigger: 'boot', source: state.source, skipped: 'no licence tokens in the ' + (state.source || 'current') + ' state', not_authorised: need, apps: ids.map(function (id) { return { id: id, status: st ? st[id] : null, activated: statusActivated((st || {})[id]) }; }) });
+      return null;
+    }
     return registerAndRefresh({ tokenList: tokens }, 'boot', true).then(function (res) {
       if (res.skipped) return res;
       log('boot registration ' + (res.ok === false ? 'FAILED' : 'done'));

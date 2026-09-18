@@ -589,3 +589,15 @@ Decisions already made (do not re-open):
   `protocol`, `href`.
 - If LG's local app origin changes between boots (fresh localStorage every time), only the bundle
   path can serve an offline boot — the `tv_boot` `origin` field is the evidence to look at.
+
+### Part D3 — licence registration on every boot, from any state source (2026-09-18)
+
+- Hardware: after Part D `tv_apps_status` showed `authNeeded` for netflix/amazon but no
+  registration ran. `bootRegisterApps()` had marked itself done as soon as the first state (cache
+  or bundle) arrived, even when that state carried no `tokenList`, so the server's answer with the
+  tokens could not trigger it. Now it runs from whichever state first carries tokens (cache,
+  bundled `state.json` or the server), exactly once per boot; a token-less state still reads the
+  status and sends `apps_registration_reason {skipped: "no licence tokens in the … state",
+  not_authorised}` without closing the door. `saveCache()` keeps the last known `activation` when
+  an answer lacks tokens; `tv_boot` lists `activation.tokens` / `status_ids` the boot state had.
+  The fake middleware now answers `authNeeded` (LG's word) for an unregistered app.

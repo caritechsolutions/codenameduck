@@ -572,3 +572,20 @@ Decisions already made (do not re-open):
 - Unverified on hardware: the exact `location.origin` of a locally stored app (logged in the
   `tv_boot` event), whether `<applicationStructure>` belongs inside `<HcapDescriptor>` (where the
   server puts it), and whether a TV with a stored version N accepts a run-mode xait with N+1.
+
+### Part D2 — state_version: cache vs bundle at boot (2026-09-18)
+
+- Hardware: a layout pushed live over WS was missing on the next *offline* boot of a bundled set.
+  Migration 015 `tenants.state_version` (monotonic; `hub.refresh()` bumps it before pushing, so
+  every change that can reach a set advances it). `state.build()` returns it; WS `layout`,
+  `lineup`, `messages`, `apps` messages carry it; `state.json` records the version at publish
+  (excluded from the state hash so a publish is not "changed" by the counter alone).
+- Renderer: `saveCache()`/`patchCache(fields, version)` merge every applied message into
+  `localStorage.cc_state` with `state_version = max(...)`; `offlineFirst()` uses whichever of
+  cache and bundle has the higher version (never the bundle just because it exists). When the
+  bundle wins over an older cache, `stateFromBundle(b, cached)` still uses the cached set identity
+  (group → its layout/lineup/apps, room, guest context). `tv_boot` carries `state_source`
+  (cache|bundle|none), `state_version`, `cache_version`, `bundle_state_version`, `origin`,
+  `protocol`, `href`.
+- If LG's local app origin changes between boots (fresh localStorage every time), only the bundle
+  path can serve an offline boot — the `tv_boot` `origin` field is the evidence to look at.

@@ -64,6 +64,7 @@ test('bundle: contents, state.json snapshot, xait forms, version bumps only on c
   assert.deepEqual(stateJson.lineups[lu.id].channels.map((c) => c.number), [5]);
   assert.equal(stateJson.groups[0].layout_id, L.id); assert.equal(stateJson.context.hotel, 'Hotel Demo'); assert.equal(stateJson.context.netflix_hotel_id, 'H-1'); assert.equal(stateJson.checkout_message, 'Bye');
   assert.deepEqual(stateJson.activation.tokenList.map((x) => x.id), ['netflix']); assert.equal(stateJson.bundle.version, 1);
+  assert.ok(Number.isInteger(stateJson.state_version) && stateJson.state_version >= 1, 'state.json carries the tenant state_version');
   assert.equal(JSON.parse(get('bundle.json')).version, 1);
   assert.equal(xaitVersions(fs.readFileSync(path.join(app, 'xait.xml'), 'utf8')).versionNumber, 0, 'run mode: xait not rewritten by a publish');
   // publish again with nothing changed → same version; a layout change → state refreshed, no bump
@@ -139,4 +140,26 @@ test('bundled app: CORS preflight on /api/tv, X-CC-Tenant resolves the tenant, W
   const bad = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${r.json.set_id}&token=${r.json.token}`, { headers: { Host: '10.0.0.5' } });
   const err = await new Promise((resolve) => { bad.once('error', (e) => resolve(e.message)); bad.once('open', () => resolve('opened')); });
   assert.match(err, /401/);
+});
+
+test('state_version: monotonic per tenant, in register/poll answers, WS pushes and the snapshot', async (t) => {
+  const s = await startServer(); t.after(s.close);
+  const { cookie } = await s.login();
+  const a = await s.registerSet('V1');
+  const v0 = a.json.state_version;
+  assert.ok(Number.isInteger(v0) && v0 >= 1);
+  const L = (await s.call('POST', '/api/admin/layouts', { cookie, body: { name: 'Main', json: { schema: 2, canvas: { w: 1920, h: 1080 }, zones: [{ id: 't', type: 'text', x: 0, y: 0, w: 900, h: 80, text: 'one' }], pages: [{ id: 'home', name: 'Home', zones: ['t'] }], home: 'home' } } })).json;
+  await s.call('PATCH', '/api/admin/tenant', { cookie, body: { default_layout_id: L.id } });
+  const p1 = (await s.call('GET', `/api/tv/poll?set_id=${a.json.set_id}&token=${a.json.token}`)).json;
+  assert.ok(p1.state_version > v0, 'a tenant change advances the version');
+  const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${a.json.set_id}&token=${a.json.token}`, { headers: { Host: 'hoteldemo.caritech.net' } });
+  const msgs = []; ws.on('message', (m) => msgs.push(JSON.parse(m.toString())));
+  await new Promise((r) => ws.once('open', r)); await new Promise((r) => setTimeout(r, 100));
+  await s.call('PUT', `/api/admin/layouts/${L.id}`, { cookie, body: { name: 'Main', json: { schema: 2, canvas: { w: 1920, h: 1080 }, zones: [{ id: 't', type: 'text', x: 0, y: 0, w: 900, h: 80, text: 'two' }], pages: [{ id: 'home', name: 'Home', zones: ['t'] }], home: 'home' } } });
+  await new Promise((r) => setTimeout(r, 200));
+  const push = msgs.filter((m) => m.type === 'layout').pop();
+  assert.ok(push && push.state_version > p1.state_version, 'the push carries a newer version than the last poll');
+  const p2 = (await s.call('GET', `/api/tv/poll?set_id=${a.json.set_id}&token=${a.json.token}`)).json;
+  assert.ok(p2.state_version >= push.state_version);
+  ws.close();
 });

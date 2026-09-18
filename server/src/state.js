@@ -73,6 +73,7 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null, pms = null } 
       commands: commandsFor(set),
       ws_url: '/ws/tv',
       poll_interval_s: pollIntervalS,
+      state_version: tenant.state_version || 1,   // Part D2: monotonic per tenant; caches and bundles compare it
       server_time: new Date().toISOString(),
     };
   }

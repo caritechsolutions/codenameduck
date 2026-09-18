@@ -137,3 +137,57 @@ test('bundled app on another origin: talks to the tenant host cross-origin, medi
   assert.equal(cache.tenant_host, `127.0.0.1:${s.stack.port}`, 'the cache remembers the tenant host for the next offline boot');
   await ctx.close();
 });
+
+test('a layout pushed live is drawn on the next offline boot; a newer bundle overrides an older cache', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  const s = await setup(t);
+  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(fakeIdcap('D0004', { __appAuth: {} }));
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.online === true && window.__cc.state.ws && window.__cc.state.ws.readyState === 1, null, { timeout: 15000 });
+  const v0 = await page.evaluate(() => window.__cc.state.stateVersion);
+  assert.ok(v0 >= 1, 'register carries state_version');
+  // live push: edit the layout text → WS layout message → cache merged with a newer version
+  const cur = (await s.stack.api('GET', `/api/admin/layouts/${s.layoutId}`, undefined, s.cookie)).json;
+  const edited = { ...cur.json, zones: cur.json.zones.map((z) => (z.id === 'hello' ? { ...z, text: 'PUSHED {{hotel}}' } : z)) };
+  await s.stack.api('PUT', `/api/admin/layouts/${s.layoutId}`, { name: cur.name, json: edited }, s.cookie);
+  await page.waitForFunction(() => /^PUSHED/.test(document.getElementById('zone-hello').textContent), null, { timeout: 5000 });
+  const cacheAfterPush = await page.evaluate(() => JSON.parse(localStorage.getItem('cc_state')));
+  assert.match(cacheAfterPush.layout.zones.find((z) => z.id === 'hello').text, /^PUSHED/, 'cache merged the push');
+  assert.ok(cacheAfterPush.state_version > v0, `cache version advanced: ${cacheAfterPush.state_version} > ${v0}`);
+  // server gone, reload: the pushed layout is what the set draws (the bundle's state.json is older)
+  s.stack.setOffline(true);
+  await page.reload();
+  await page.waitForFunction(() => window.__cc && window.__cc.state.layout && window.__cc.state.source === 'cache', null, { timeout: 10000 });
+  assert.match(await page.$eval('#zone-hello', (e) => e.textContent), /^PUSHED Demo/);
+  // a bundle with a newer state_version overrides an older cache: publish a new snapshot with
+  // another edit, then age the cache (as LG's app-update wipe or a stale cache would) and reboot
+  s.stack.setOffline(false);
+  const edited2 = { ...edited, zones: edited.zones.map((z) => (z.id === 'hello' ? { ...z, text: 'BUNDLED {{hotel}}' } : z)) };
+  await s.stack.api('PUT', `/api/admin/layouts/${s.layoutId}`, { name: cur.name, json: edited2 }, s.cookie);
+  await page.waitForFunction(() => /^BUNDLED/.test(document.getElementById('zone-hello').textContent), null, { timeout: 5000 });
+  const pub = await s.stack.api('POST', '/api/admin/deployment/publish', {}, s.cookie);
+  assert.equal(pub.status, 200);
+  const bundledVersion = JSON.parse(require('fs').readFileSync(require('path').join(s.stack.appDir, 'state.json'), 'utf8')).state_version;
+  await page.evaluate(() => { const c = JSON.parse(localStorage.getItem('cc_state')); c.state_version = 1; c.layout.zones.find((z) => z.id === 'hello').text = 'STALE {{hotel}}'; localStorage.setItem('cc_state', JSON.stringify(c)); });
+  s.stack.setOffline(true);
+  await page.reload();
+  await page.waitForFunction(() => window.__cc && window.__cc.state.layout && window.__cc.state.source === 'bundle', null, { timeout: 10000 });
+  assert.match(await page.$eval('#zone-hello', (e) => e.textContent), /^BUNDLED Demo/, 'the newer bundle wins over the stale cache');
+  assert.equal(await page.evaluate(() => window.__cc.state.stateVersion), bundledVersion);
+  // the boot event says which source and version were used
+  s.stack.setOffline(false);
+  await page.evaluate(() => window.__cc.registerNow());
+  await page.waitForFunction(() => window.__cc.state.online === true, null, { timeout: 15000 });
+  const set = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'D0004');
+  let boots = [];
+  // the very first online boot also pre-rendered from the (older) bundle; wait for the boot that used the new one
+  const isNew = (b) => b.payload.state_source === 'bundle' && b.payload.state_version === bundledVersion;
+  for (let i = 0; i < 80 && !boots.some(isNew); i++) { await sleep(250); boots = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json.events.filter((e) => e.type === 'tv_boot'); }
+  const bundleBoot = boots.find(isNew);
+  assert.ok(bundleBoot, 'the offline boot event reached the server once it was back: ' + JSON.stringify(boots.map((b) => b.payload.state_source)));
+  assert.equal(bundleBoot.payload.state_version, bundledVersion); assert.equal(bundleBoot.payload.cache_version, 1); assert.ok(bundleBoot.payload.origin && bundleBoot.payload.protocol);
+  assert.ok(boots.some((b) => b.payload.state_source === 'server' || b.payload.state_source === 'none' || b.payload.state_source === 'cache'));
+  await ctx.close();
+});

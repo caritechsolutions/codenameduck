@@ -509,3 +509,15 @@ library has at least the logo; a layout with a video zone, a text zone with `{{h
 8. **Instant On / WARM.** With Instant On, a remote power-off/on does not reload the app — a real
    xait check needs a cold boot (AC off) or LG's scheduled power cycle; note which one picked the
    new bundle up.
+
+### Part D2 — live pushes survive an offline boot
+
+9. **Push, then offline boot.** Server up, set online: edit a layout text and save (the set
+   redraws live). Stop the service, power-cycle the set: the edited text must be there. The set's
+   `tv_boot` event (after the service is back) shows `state_source: "cache"` with a `state_version`
+   at least the one from the push, plus `origin`, `protocol` and `href` — **send me those three
+   fields**: if the origin differs between boots LG gives the bundled app a fresh localStorage each
+   time and only the bundle can serve an offline boot.
+10. **Newer bundle wins.** Edit the layout again, Publish bundle, stop the service, power-cycle:
+    `tv_boot` shows `state_source: "bundle"` only if the bundle's `state_version` is higher than
+    the cache's (after an app update LG wipes localStorage, so the fresh bundle wins by itself).

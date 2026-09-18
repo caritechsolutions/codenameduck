@@ -33,7 +33,7 @@ var state = {
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
   apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, bootPromise: null, appsHold: false, pendingApps: null, serviceCountry: null,
-  online: null, source: null, cachedAt: null
+  online: null, source: null, cachedAt: null, stateVersion: 0
 };
 
 // ---------------------------------------------------------------- logging
@@ -648,13 +648,20 @@ function saveCache(data) {
   try {
     var copy = {}; for (var k in data) if (k !== 'commands') copy[k] = data[k];
     copy.set_id = state.setId; copy.token = state.token; copy.saved_at = new Date().toISOString(); copy.tenant_host = API.tenant || null;
+    copy.state_version = Math.max(Number(data.state_version) || 0, Number(state.stateVersion) || 0);
+    state.stateVersion = copy.state_version;
     localStorage.setItem(CACHE_KEY, JSON.stringify(copy));
   } catch (e) { /* storage full or disabled */ }
 }
-function patchCache(fields) {
+// Merge a live push into the cache right away, carrying the server's state_version (monotonic
+// per tenant) so the next boot can tell this cache from the bundled state.json.
+function patchCache(fields, version) {
+  var v = Number(version) || 0;
+  if (v > (Number(state.stateVersion) || 0)) state.stateVersion = v;
   var c = loadCache(); if (!c) return;
-  for (var k in fields) c[k] = fields[k];
+  for (var k in fields) if (fields[k] !== undefined) c[k] = fields[k];
   c.saved_at = new Date().toISOString();
+  c.state_version = Math.max(Number(c.state_version) || 0, v);
   try { localStorage.setItem(CACHE_KEY, JSON.stringify(c)); } catch (e) { /* ignore */ }
 }
 function loadCache() { try { var c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); return c && c.layout ? c : null; } catch (e) { return null; } }
@@ -681,34 +688,49 @@ function configureApi(bundled, cached) {
 }
 // State for a set that has never registered, from the bundled snapshot: the tenant's default
 // layout and lineup, blank guest, no apps; the licences so Netflix can still be activated.
-function stateFromBundle(b) {
-  var room = state.props.room_number && !/^\[TV\]/i.test(state.props.room_number) ? state.props.room_number : '';
-  var layout = b.default_layout_id && b.layouts && b.layouts[b.default_layout_id] ? b.layouts[b.default_layout_id] : null;
-  var lineup = b.default_lineup_id && b.lineups && b.lineups[b.default_lineup_id] ? b.lineups[b.default_lineup_id].channels : [];
+function stateFromBundle(b, cached) {
+  var room = (cached && cached.room_number) || (state.props.room_number && !/^\[TV\]/i.test(state.props.room_number) ? state.props.room_number : '');
+  // the set's own group (from an older cache) picks the group's layout/lineup/apps out of the bundle
+  var group = cached && cached.group && cached.group.id ? (b.groups || []).filter(function (g) { return g.id === cached.group.id; })[0] : null;
+  var layoutId = (group && group.layout_id) || b.default_layout_id;
+  var lineupId = (group && group.lineup_id) || b.default_lineup_id;
+  var layout = layoutId && b.layouts && b.layouts[layoutId] ? b.layouts[layoutId] : null;
+  var lineup = lineupId && b.lineups && b.lineups[lineupId] ? b.lineups[lineupId].channels : [];
   var ctx = {}; for (var k in (b.context || {})) ctx[k] = b.context[k];
-  ctx.room = room; ctx.serial = state.props.serial_number || ''; ctx.guest = ctx.guest || ''; ctx.guest_first = ''; ctx.guest_last = ''; ctx.checkin_date = ''; ctx.checkout_date = ''; ctx.nights = '';
-  return { context: ctx, layout: layout || localLayout('Waiting for the server (' + (b.tenant_host || '?') + ')\nThis set has not been registered yet.'), lineup: lineup, messages: [], apps: [], activation: b.activation || null, poll_interval_s: b.poll_interval_s || 60, ws_url: '/ws/tv' };
+  if (cached && cached.context) ['guest', 'guest_first', 'guest_last', 'checkin_date', 'checkout_date', 'nights', 'guest_lang', 'vip', 'occupied'].forEach(function (k) { if (cached.context[k] !== undefined) ctx[k] = cached.context[k]; });
+  ctx.room = room; ctx.serial = state.props.serial_number || '';
+  ['guest', 'guest_first', 'guest_last', 'checkin_date', 'checkout_date', 'nights'].forEach(function (k) { if (ctx[k] == null) ctx[k] = ''; });
+  return { context: ctx, layout: layout || localLayout('Waiting for the server (' + (b.tenant_host || '?') + ')\nThis set has not been registered yet.'), lineup: lineup, messages: [], apps: group ? (group.apps || []) : [],
+    group: group ? { id: group.id, name: group.name } : null, room_number: room || null, activation: b.activation || null, poll_interval_s: b.poll_interval_s || 60, ws_url: '/ws/tv', state_version: Number(b.state_version) || 0 };
 }
 // Boot: draw from cache or bundle immediately, then keep trying the server.
 function offlineFirst() {
   var cached = loadCache();
-  return fetchJson('./bundle.json', 2000).then(function (bj) {
+  // cache-busted: a republished state.json must not be served from the browser's heuristic cache
+  var bust = '?t=' + Date.now();
+  return fetchJson('./bundle.json' + bust, 2000).then(function (bj) {
     if (bj && bj.version != null) API.bundleVersion = Number(bj.version);
-    return fetchJson('./state.json', 3000);
+    return fetchJson('./state.json' + bust, 3000);
   }).then(function (bundled) {
     configureApi(bundled, cached);
-    if (cached) {
-      state.setId = cached.set_id || null; state.token = cached.token || null; state.cachedAt = cached.saved_at || null; state.source = 'cache';
+    // Whichever is newer wins: the cache carries the state_version of the last push it merged,
+    // the bundle the version at publish. (LG wipes localStorage on an app update, so a fresh
+    // bundle's state.json wins by itself after a bump.)
+    var cv = cached ? Number(cached.state_version) || 0 : -1, bv = bundled ? Number(bundled.state_version) || 0 : -1;
+    if (cached) { state.setId = cached.set_id || null; state.token = cached.token || null; state.cachedAt = cached.saved_at || null; }
+    if (cached && cv >= bv) {
+      state.source = 'cache'; state.stateVersion = cv;
       applyState(cached, { offline: true });
-      log('running from cache (' + (cached.saved_at || '?') + ') until the server answers');
+      log('running from cache v' + cv + ' (' + (cached.saved_at || '?') + ')' + (bundled ? ', bundle has v' + bv : '') + ' until the server answers');
       showStatus(false);
     } else if (bundled) {
-      state.source = 'bundle';
-      applyState(stateFromBundle(bundled), { offline: true });
-      log('running from the bundled state.json (' + (bundled.generated_at || '?') + ') until the server answers');
+      state.source = 'bundle'; state.stateVersion = bv;
+      applyState(stateFromBundle(bundled, cached), { offline: true });
+      log('running from the bundled state.json v' + bv + ' (' + (bundled.generated_at || '?') + ')' + (cached ? ', cache had v' + cv : '') + ' until the server answers');
       showStatus(false);
     } else state.source = 'none';
-    sendEvent('boot', { origin: (window.location && window.location.origin) || null, source: state.source, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt });
+    sendEvent('boot', { origin: (window.location && window.location.origin) || null, protocol: window.location && window.location.protocol, href: window.location && String(window.location.href).slice(0, 200),
+      source: state.source, state_source: state.source, state_version: state.stateVersion, cache_version: cached ? cv : null, bundle_state_version: bundled ? bv : null, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt });
   });
 }
 
@@ -809,6 +831,8 @@ function flushEvents() {
   if (state.ws && state.ws.readyState === 1) { batch.forEach(function (ev) { state.ws.send(JSON.stringify({ type: 'event', name: ev.name, payload: ev.payload, at: ev.at })); }); return; }
   request('POST', '/api/tv/events' + authQs(), { events: batch }).then(null, function () {
     pendingEvents = batch.concat(pendingEvents).slice(-MAX_PENDING_EVENTS);
+    // the WebSocket may have come up while the HTTP batch was failing (server just back): use it now
+    if (state.ws && state.ws.readyState === 1) { flushEvents(); return; }
     state.flushTimer = setTimeout(flushEvents, 15000);
   });
 }
@@ -873,11 +897,11 @@ function onWsMessage(msg) {
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview, msg.page || null);
       if (msg.preview) log('preview layout from admin');
-      else patchCache({ layout: msg.layout, context: msg.context || state.context, room_number: msg.room_number, group: msg.group, instant_power: msg.instant_power });
+      else patchCache({ layout: msg.layout, context: msg.context || state.context, room_number: msg.room_number, group: msg.group, instant_power: msg.instant_power }, msg.state_version);
       break;
-    case 'lineup': applyLineup(msg.lineup); patchCache({ lineup: msg.lineup }); break;
-    case 'messages': applyMessages(msg.messages); patchCache({ messages: msg.messages }); break;
-    case 'apps': applyApps(msg.apps); patchCache({ apps: msg.apps }); break;
+    case 'lineup': applyLineup(msg.lineup); patchCache({ lineup: msg.lineup, lineup_id: msg.lineup_id }, msg.state_version); break;
+    case 'messages': applyMessages(msg.messages); patchCache({ messages: msg.messages }, msg.state_version); break;
+    case 'apps': applyApps(msg.apps); patchCache({ apps: msg.apps }, msg.state_version); break;
     case 'command': runCommand(msg.command, ackViaWs); break;
     case 'deleted': log('this set was deleted in admin; re-registering'); state.setId = null; state.token = null; registerLoop(0); break;
     case 'pong': break;
@@ -904,7 +928,7 @@ function registerLoop(attempt) {
     if (state.ws) { try { state.ws.onclose = null; state.ws.close(); } catch (e) {} state.ws = null; }
     showStatus(false);
     var wasOffline = state.online === false;
-    state.online = true; state.source = 'server';
+    state.online = true; state.source = 'server'; if (Number(data.state_version) > (Number(state.stateVersion) || 0)) state.stateVersion = Number(data.state_version);
     log('registered as set ' + data.set_id + (data.created ? ' (new)' : '') + (wasOffline ? ' — server is back' : ''));
     applyState(data);
     saveCache(data);

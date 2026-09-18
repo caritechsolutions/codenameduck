@@ -112,7 +112,7 @@ function createBundler({ db, tenantsDir, apps = null, state = null, publicHost =
     const context = state ? state.context(t, { room_number: '', serial: '' }) : {};
     delete context.room; delete context.serial;
     return {
-      schema: 1, tenant_host: hostOf(t), tenant_name: t.name, generated_at: new Date().toISOString(),
+      schema: 1, tenant_host: hostOf(t), tenant_name: t.name, generated_at: new Date().toISOString(), state_version: t.state_version || 1,
       bundle: { version: t.bundle_version || 0, build: distBuild(t) },
       context, checkout_message: st.checkout_message || null, poll_interval_s: 60,
       default_layout_id: t.default_layout_id || null, default_lineup_id: t.default_lineup_id || null,
@@ -134,7 +134,7 @@ function createBundler({ db, tenantsDir, apps = null, state = null, publicHost =
     for (const p of before.keys()) if (!after.has(p)) removed.push(p);
     const hash = contentHash(files);
     const snap = snapshot(t);
-    const stateSha = sha(JSON.stringify({ ...snap, generated_at: null, bundle: null }));
+    const stateSha = sha(JSON.stringify({ ...snap, generated_at: null, bundle: null, state_version: null }));
     const zipExists = fs.existsSync(path.join(appDir(t), 'app.zip'));
     return { mode: t.deploy_mode || 'run', current_version: t.bundle_version || 0, next_version: !zipExists || !manifest || hash !== t.bundle_hash ? nextVersion(t.bundle_version) : (t.bundle_version || 0),
       bump: !zipExists || !manifest || hash !== t.bundle_hash, state_changed: !manifest || manifest.state_sha !== stateSha, added, removed, changed, unchanged: files.length - added.length - changed.length,
@@ -149,7 +149,7 @@ function createBundler({ db, tenantsDir, apps = null, state = null, publicHost =
     const d = diff(t);
     const version = d.bump || force ? nextVersion(t.bundle_version) : (t.bundle_version || 0);
     const snap = snapshot(t); snap.bundle.version = version;
-    const stateSha = sha(JSON.stringify({ ...snap, generated_at: null, bundle: null }));
+    const stateSha = sha(JSON.stringify({ ...snap, generated_at: null, bundle: null, state_version: null }));
     const files = collect(t);
     const manifest = { version, hash: d.hash, build: d.build, built_at: new Date().toISOString(), by, state_sha: stateSha, mode: t.deploy_mode || 'run',
       files: files.map((f) => ({ path: f.path, bytes: f.bytes, sha: f.sha })) };

@@ -1,0 +1,139 @@
+'use strict';
+// Phase 3 Part D: offline-first renderer. Boots from the cached register answer (or the bundled
+// state.json) with the server unreachable, tunes and navigates, then syncs when the server is back.
+// A bundled app on another origin talks to the tenant host cross-origin with X-CC-Tenant.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fakeIdcap = require('./fake-idcap');
+const { startStack, launchChromium, sleep } = require('./harness');
+
+let browser;
+test.before(async () => { browser = await launchChromium(); });
+test.after(async () => { if (browser) await browser.close(); });
+
+const KEY = { ENTER: 0x0D, DOWN: 0x28, BACK: 0x1CD, CH_UP: 0x1AB };
+
+async function setup(t) {
+  const stack = await startStack({ serveTenantDir: true }); t.after(stack.close);
+  const cookie = await stack.login();
+  const clip = { number: 9, name: 'Clip', type: 'ip', params: { url: `${stack.base}/fixtures/tiny.webm`, mimeType: 'video/webm' } };
+  const mc = { number: 10, name: 'Multicast', type: 'ip', params: { ip: '239.1.1.1', port: 1234, ipBroadcastType: 'udp' } };
+  const c1 = (await stack.api('POST', '/api/admin/channels', clip, cookie)).json;
+  const c2 = (await stack.api('POST', '/api/admin/channels', mc, cookie)).json;
+  assert.ok(c1.id && c2.id, JSON.stringify([c1, c2]));
+  const lu = (await stack.api('POST', '/api/admin/lineups', { name: 'Main', channel_ids: [c1.id, c2.id] }, cookie)).json;
+  const layout = { schema: 2, canvas: { w: 1920, h: 1080 }, zones: [
+    { id: 'tv', type: 'video', x: 640, y: 120, w: 1200, h: 675 },
+    { id: 'hello', type: 'text', x: 80, y: 60, w: 500, h: 80, text: 'Hotel {{hotel}} room {{room}}', style: { fontSize: 40, color: '#fff' } },
+    { id: 'logo', type: 'image', x: 80, y: 900, w: 300, h: 100, src: '/procentric/application/media/logo.png' },
+    { id: 'btn', type: 'button', x: 80, y: 400, w: 300, h: 80, label: 'Info', action: { type: 'goto_page', page: 'info' } },
+    { id: 'infotext', type: 'text', x: 100, y: 100, w: 1000, h: 200, text: 'INFO PAGE', style: { fontSize: 40, color: '#fff' } },
+  ], pages: [{ id: 'home', name: 'Home', zones: ['tv', 'hello', 'logo', 'btn'] }, { id: 'info', name: 'Info', zones: ['infotext'] }], home: 'home' };
+  const l = (await stack.api('POST', '/api/admin/layouts', { name: 'Main', json: layout }, cookie)).json;
+  await stack.api('PATCH', '/api/admin/tenant', { display_name: 'Demo', default_layout_id: l.id, default_lineup_id: lu.id, settings: { netflix_hotel_id: 'H-1' } }, cookie);
+  await stack.api('POST', '/api/admin/licences', { files: [{ filename: 'NETFLIX_x.lic', content: 'TkZYLXRva2VuLWZvci1vZmZsaW5lLXRlc3Q=' }] }, cookie);
+  require('fs').mkdirSync(require('path').join(stack.appDir, 'media'), { recursive: true });
+  require('fs').writeFileSync(require('path').join(stack.appDir, 'media', 'logo.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+  const pub = await stack.api('POST', '/api/admin/deployment/publish', {}, cookie);
+  assert.equal(pub.status, 200, JSON.stringify(pub.json));
+  return { stack, cookie, layoutId: l.id };
+}
+const key = (page, code) => page.evaluate((c) => { const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true }); Object.defineProperty(e, 'keyCode', { get: () => c }); document.dispatchEvent(e); }, code);
+const fake = (page) => page.evaluate(() => JSON.parse(JSON.stringify(window.__fake)));
+
+test('server unreachable: boots from the cached state, tunes, navigates pages; syncs when the server returns', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  const s = await setup(t);
+  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(fakeIdcap('D0001', { __appAuth: {} }));
+  // 1. online boot → registers, caches
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.online === true && window.__cc.state.setId, null, { timeout: 10000 });
+  const set = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'D0001');
+  await s.stack.api('PATCH', `/api/admin/sets/${set.id}`, { room_number: '101' }, s.cookie);
+  await page.waitForFunction(() => /room 101/.test(document.getElementById('zone-hello').textContent), null, { timeout: 5000 });
+  await page.waitForFunction(() => { try { return JSON.parse(localStorage.getItem('cc_state')).context.room === '101'; } catch (e) { return false; } }, null, { timeout: 5000 });
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('cc_state')).tenant_host), null, 'same origin: no tenant host needed');
+  assert.equal(await page.evaluate(() => window.__cc.api.bundleVersion), 1, 'bundle.json read');
+  // 2. server gone → reload → portal from cache
+  s.stack.setOffline(true);
+  await page.reload();
+  await page.waitForFunction(() => window.__cc && window.__cc.state.layout && window.__cc.state.source === 'cache', null, { timeout: 10000 });
+  assert.equal(await page.$eval('#zone-hello', (e) => e.textContent), 'Hotel Demo room 101');
+  assert.ok(await page.$('#zone-tv'), 'video zone drawn');
+  await page.waitForFunction(() => window.__cc.state.online === false, null, { timeout: 10000 });
+  assert.equal(await page.$eval('#status', (e) => e.className), '', 'status overlay hidden: the guest sees the portal');
+  // tuning works from the cached lineup (HTML5 clip then the multicast channel via IDCAP)
+  await page.waitForFunction(() => window.__cc.state.channel && window.__cc.state.channel.number === 9, null, { timeout: 10000 });
+  await key(page, KEY.CH_UP);
+  await page.waitForFunction(() => window.__cc.state.channel && window.__cc.state.channel.number === 10, null, { timeout: 5000 });
+  await page.waitForFunction(() => window.__fake.channel && window.__fake.channel.ip === '239.1.1.1', null, { timeout: 5000 });   // the IDCAP request is async
+  let f = await fake(page);
+  assert.ok(f.channel && f.channel.ip === '239.1.1.1', 'IDCAP channel change with the server down: ' + JSON.stringify(f.channel));
+  // page navigation + BACK
+  await key(page, KEY.DOWN); await key(page, KEY.ENTER);
+  await page.waitForFunction(() => document.getElementById('zone-infotext'), null, { timeout: 5000 });
+  await key(page, KEY.BACK);
+  await page.waitForFunction(() => !document.getElementById('zone-infotext') && document.getElementById('zone-hello'), null, { timeout: 5000 });
+  // Netflix activation still knows the tokens (from the cache)
+  assert.deepEqual(await page.evaluate(() => (window.__cc.state.activation || {}).tokenList.map((x) => x.id)), ['netflix']);
+  // 3. server back → the next retry registers, state syncs, WS connects
+  s.stack.setOffline(false);
+  await page.evaluate(() => window.__cc.registerNow());
+  await page.waitForFunction(() => window.__cc.state.online === true && window.__cc.state.ws && window.__cc.state.ws.readyState === 1, null, { timeout: 15000 });
+  await s.stack.api('PATCH', '/api/admin/tenant', { display_name: 'Demo Two' }, s.cookie);
+  await page.waitForFunction(() => /Hotel Demo Two/.test(document.getElementById('zone-hello').textContent), null, { timeout: 5000 });
+  await sleep(300);
+  const detail = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json;
+  const types = detail.events.map((e) => e.type);
+  assert.ok(types.includes('tv_offline') && types.includes('tv_online'), 'offline/online events reached the server: ' + types.join(','));
+  assert.ok(detail.events.some((e) => e.type === 'tv_boot' && e.payload.source === 'cache'));
+  await ctx.close();
+});
+
+test('cold boot with no cache: the bundled state.json gives the default layout and lineup', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  const s = await setup(t);
+  s.stack.setOffline(true);
+  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const page = await ctx.newPage();
+  await page.addInitScript(fakeIdcap('D0002', { __appAuth: {}, room_number: '202' }));
+  await page.goto(s.stack.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.layout && window.__cc.state.source === 'bundle', null, { timeout: 10000 });
+  assert.equal(await page.$eval('#zone-hello', (e) => e.textContent), 'Hotel Demo room 202', 'room from the TV property, hotel from state.json');
+  await page.waitForFunction(() => window.__cc.state.channel && window.__cc.state.channel.number === 9, null, { timeout: 10000 });
+  assert.equal(await page.evaluate(() => window.__cc.state.lineup.length), 2);
+  assert.deepEqual(await page.evaluate(() => (window.__cc.state.activation || {}).tokenList.map((x) => x.id)), ['netflix'], 'licences ride in state.json');
+  assert.equal(await page.evaluate(() => window.__cc.state.setId), null, 'never registered');
+  s.stack.setOffline(false);
+  await page.evaluate(() => window.__cc.registerNow());
+  await page.waitForFunction(() => window.__cc.state.online === true && window.__cc.state.setId, null, { timeout: 15000 });
+  await ctx.close();
+});
+
+test('bundled app on another origin: talks to the tenant host cross-origin, media from the bundle first, origin recorded', async (t) => {
+  if (!browser) { t.skip('chromium unavailable'); return; }
+  const s = await setup(t);
+  const other = await s.stack.startOtherOrigin(); t.after(other.close);
+  const ctx = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+  const page = await ctx.newPage();
+  const requests = [];
+  page.on('request', (r) => requests.push(r.url()));
+  await page.addInitScript(fakeIdcap('D0003', { __appAuth: {} }));
+  await page.goto(other.url);
+  await page.waitForFunction(() => window.__cc && window.__cc.state.online === true && window.__cc.state.setId, null, { timeout: 15000 });
+  const api = await page.evaluate(() => JSON.parse(JSON.stringify(window.__cc.api)));
+  assert.equal(api.base, s.stack.base, 'server address from state.json tenant_host'); assert.equal(api.tenant, `127.0.0.1:${s.stack.port}`); assert.equal(api.bundled, true);
+  assert.ok(requests.some((u) => u === `${s.stack.base}/api/tv/register`), 'register went cross-origin to the tenant host');
+  await page.waitForFunction(() => window.__cc.state.ws && window.__cc.state.ws.readyState === 1, null, { timeout: 10000 });
+  // media: the logo is loaded from the bundle's own origin, not the server
+  const logoSrc = await page.$eval('#zone-logo img', (i) => i.getAttribute('src'));
+  assert.equal(logoSrc, './media/logo.png');
+  assert.equal(await page.$eval('#zone-logo img', (i) => i.naturalWidth), 1, 'and it loaded');
+  const set = (await s.stack.api('GET', '/api/admin/sets', undefined, s.cookie)).json.find((x) => x.serial === 'D0003');
+  assert.equal(set.origin, other.url.replace(/\/procentric.*$/, '')); assert.equal(set.bundle_version, 1);
+  const cache = await page.evaluate(() => JSON.parse(localStorage.getItem('cc_state')));
+  assert.equal(cache.tenant_host, `127.0.0.1:${s.stack.port}`, 'the cache remembers the tenant host for the next offline boot');
+  await ctx.close();
+});

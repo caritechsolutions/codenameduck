@@ -23,12 +23,33 @@ async function startStack(opts = {}) {
   migrate(db);
   const logs = [];
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-e2e-data-'));
-  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir, pollIntervalS: 15, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand });
-  srv.app.use('/procentric/application', express.static(DIST, { etag: false, cacheControl: false }));
+  let port = 0;
+  // Part D: serveTenantDir copies dist into the tenant's application dir (as coopcentric-tenant
+  // deploy does) and serves that, so app.zip / state.json / bundle.json written by a publish are
+  // visible to the page; publicHost bakes the test port into state.json's tenant_host.
+  const serveDir = opts.serveTenantDir ? appDir : DIST;
+  if (opts.serveTenantDir) fs.cpSync(DIST, appDir, { recursive: true });
+  const srv = createServer({ db, tenantsDir, adminDist: opts.adminDist || null, dataDir, pollIntervalS: 15, log: (m) => logs.push(m), weatherFetch: opts.weatherFetch, tenantCommand: opts.tenantCommand,
+    publicHost: () => `127.0.0.1:${port}` });
+  let offline = false;   // simulate an unreachable server: TV API + WS sockets are dropped
+  srv.app.use((req, res, next) => { if (offline && (req.path.startsWith('/api/') || req.path.startsWith('/ws/'))) { req.socket.destroy(); return; } next(); });
+  srv.app._router.stack.splice(2, 0, srv.app._router.stack.pop());   // after express's query/init layers, before the API routers createServer mounted
+  srv.app.use('/procentric/application', express.static(serveDir, { etag: false, cacheControl: false }));
   srv.app.use('/fixtures', express.static(path.join(__dirname, 'fixtures'), { etag: false, cacheControl: false }));
+  const upgraders = srv.server.listeners('upgrade'); srv.server.removeAllListeners('upgrade');
+  srv.server.on('upgrade', (req, sock, head) => { if (offline) { sock.destroy(); return; } upgraders.forEach((l) => l(req, sock, head)); });
   await new Promise((r) => srv.server.listen(0, '127.0.0.1', r));
-  const port = srv.server.address().port;
+  port = srv.server.address().port;
   const base = `http://127.0.0.1:${port}`;
+  const setOffline = (v) => { offline = !!v; if (offline) srv.hub.dropAll(); };
+  // A second origin serving the same files, like the TV's local storage in remote-deploy mode.
+  async function startOtherOrigin() {
+    const app2 = express();
+    app2.use('/procentric/application', express.static(serveDir, { etag: false, cacheControl: false }));
+    const s2 = http.createServer(app2);
+    await new Promise((r) => s2.listen(0, '127.0.0.1', r));
+    return { url: `http://127.0.0.1:${s2.address().port}/procentric/application/index.html`, close: () => new Promise((r) => s2.close(r)) };
+  }
   const api = (method, p, body, cookie) => new Promise((resolve, reject) => {
     const data = body === undefined ? null : JSON.stringify(body);
     const req = http.request({ host: '127.0.0.1', port, path: p, method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...(data ? { 'Content-Length': Buffer.byteLength(data) } : {}) } }, (res) => {
@@ -38,7 +59,7 @@ async function startStack(opts = {}) {
   });
   const login = async () => (await api('POST', '/api/admin/login', { username: 'admin', password: srv.seeded.password })).cookie;
   const close = () => { srv.hub.closeAll(); return new Promise((r) => srv.server.close(r)); };
-  return { ...srv, db, port, base, api, login, logs, close, dataDir, url: base + '/procentric/application/index.html', adminUrl: base + '/admin/' };
+  return { ...srv, db, port, base, api, login, logs, close, dataDir, appDir, setOffline, startOtherOrigin, url: base + '/procentric/application/index.html', adminUrl: base + '/admin/' };
 }
 
 // Playwright is a dev tool that may not be installed on the VM; tests skip when it is missing.

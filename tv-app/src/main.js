@@ -11,7 +11,9 @@ import * as model from '../../shared/layout-model.js';
 
 var APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmware_version', 'webos_version', 'idpn', 'room_number', 'instant_power'];
-var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000];
+var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000, 60000];   // then every 60 s for as long as the server is unreachable
+var CACHE_KEY = 'cc_state';               // last good /api/tv/register answer (offline-first, Part D)
+var API = { base: '', tenant: null, bundled: false, bundleVersion: null };   // where the server is; '' = same origin (remote-run)
 var CLAIMED_KEYS = ['CH_UP', 'CH_DOWN', 'NUM_0', 'NUM_1', 'NUM_2', 'NUM_3', 'NUM_4', 'NUM_5', 'NUM_6', 'NUM_7', 'NUM_8', 'NUM_9', 'PORTAL', 'GUIDE', 'INFO', 'BACK', 'LAST_CH', 'NETFLIX'];
 var NETFLIX_LAUNCHER_VERSION = '1.0';
 var BANNER_MS = 3500;
@@ -30,7 +32,8 @@ var state = {
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
-  apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, bootPromise: null, appsHold: false, pendingApps: null, serviceCountry: null
+  apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, bootPromise: null, appsHold: false, pendingApps: null, serviceCountry: null,
+  online: null, source: null, cachedAt: null
 };
 
 // ---------------------------------------------------------------- logging
@@ -45,9 +48,10 @@ function showStatus(on) { statusEl.className = on ? 'show' : ''; }
 function request(method, url, body) {
   return new Promise(function (resolve, reject) {
     var xhr = new XMLHttpRequest();
-    xhr.open(method, url, true);
+    xhr.open(method, API.base + url, true);
     xhr.timeout = 15000;
     xhr.setRequestHeader('Accept', 'application/json');
+    if (API.tenant) xhr.setRequestHeader('X-CC-Tenant', API.tenant);   // bundled app: the tenant is named, not implied by Host
     if (body !== undefined) xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function () {
       var data = null;
@@ -62,7 +66,7 @@ function request(method, url, body) {
 }
 function authQs() { return '?set_id=' + encodeURIComponent(state.setId) + '&token=' + encodeURIComponent(state.token); }
 function register() {
-  var body = { api: state.api, app_version: APP_VERSION };
+  var body = { api: state.api, app_version: APP_VERSION, origin: (window.location && window.location.origin) || null, bundle_version: API.bundleVersion, source: state.source };
   PROPERTY_KEYS.forEach(function (k) { body[k] = state.props[k]; });
   if (state.appsReported) body.apps = state.appsReported;   // idcap://application/list result, raw
   if (state.appsStatus) body.apps_status = state.appsStatus;   // idcap://application/register/status per app, raw
@@ -108,9 +112,23 @@ var substitute = draw.substitute, applyStyle = draw.applyStyle, formatClock = dr
 // {{time}} and {{date}} computed on the set.
 function textContext() { return draw.liveContext(state.context, new Date()); }
 // Live data the shared drawers need (lineup, current channel, menu focus, weather).
+// Media: a bundled app carries the tenant's media library in its zip (media/…), so tenant URLs
+// like /procentric/application/media/x.png resolve to the local copy first; on error the same
+// file is tried on the server. Anything else (http URLs, data:) is left alone.
+var MEDIA_PATH = /^\/procentric\/application\/((media|assets|fonts)\/.+)$/;
+function mediaUrl(src) {
+  var m = MEDIA_PATH.exec(String(src || ''));
+  if (!m) return src;
+  return API.bundled ? './' + m[1] : (API.base ? API.base + src : src);
+}
+function mediaFallback(src) {
+  var m = MEDIA_PATH.exec(String(src || ''));
+  if (!m) return null;
+  return API.base ? API.base + src : (API.bundled ? 'http://' + (API.tenant || window.location.host) + src : null);
+}
 function drawEnv() {
   return { lineup: state.lineup, currentIndex: currentIndex(), focus: state.focus, weather: state.weather, apps: state.apps,
-    units: state.context && state.context.units, videoRect: effectiveVideoRect, preview: false };
+    units: state.context && state.context.units, videoRect: effectiveVideoRect, preview: false, mediaUrl: mediaUrl, mediaFallback: mediaFallback };
 }
 
 var RENDERERS = draw.DRAWERS;
@@ -610,7 +628,8 @@ function applyMessages(messages) {
   var m = state.messages[0];
   if (m) showMessage(m.text, 0); else hideMessage();
 }
-function applyState(data) {
+function applyState(data, opts) {
+  opts = opts || {};
   state.context = data.context || { hotel: '', room: data.room_number || '', guest: '', serial: state.props.serial_number || '' };
   applyLayout(data.layout, state.context);
   applyLineup(data.lineup);
@@ -618,8 +637,79 @@ function applyState(data) {
   if (data.apps) applyApps(data.apps);
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
   if (data.activation !== undefined) { state.activation = data.activation || null; bootRegisterApps(); }   // before commands: register_apps waits for it
+  if (opts.offline) return;   // cached/bundled state: no stale commands, no WS until the server answers
   if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
   if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
+}
+// ---------------------------------------------------------------- offline-first (Part D)
+// The last good register answer is kept in localStorage; a bundled app also ships state.json.
+// At boot the set draws from whichever it has before the server is even asked.
+function saveCache(data) {
+  try {
+    var copy = {}; for (var k in data) if (k !== 'commands') copy[k] = data[k];
+    copy.set_id = state.setId; copy.token = state.token; copy.saved_at = new Date().toISOString(); copy.tenant_host = API.tenant || null;
+    localStorage.setItem(CACHE_KEY, JSON.stringify(copy));
+  } catch (e) { /* storage full or disabled */ }
+}
+function patchCache(fields) {
+  var c = loadCache(); if (!c) return;
+  for (var k in fields) c[k] = fields[k];
+  c.saved_at = new Date().toISOString();
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(c)); } catch (e) { /* ignore */ }
+}
+function loadCache() { try { var c = JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); return c && c.layout ? c : null; } catch (e) { return null; } }
+function fetchJson(url, ms) {
+  return new Promise(function (resolve) {
+    var xhr = new XMLHttpRequest();
+    try { xhr.open('GET', url, true); } catch (e) { resolve(null); return; }
+    xhr.timeout = ms || 3000;
+    xhr.onload = function () { var d = null; try { d = JSON.parse(xhr.responseText); } catch (e) {} resolve(xhr.status === 0 || (xhr.status >= 200 && xhr.status < 300) ? d : null); };
+    xhr.onerror = xhr.ontimeout = function () { resolve(null); };
+    try { xhr.send(null); } catch (e) { resolve(null); }
+  });
+}
+// Where the server is. Same origin (remote-run) needs nothing. A bundled app (remote-deploy:
+// file:// or the TV's local origin) finds its tenant hostname in the cache or state.json.
+function configureApi(bundled, cached) {
+  var host = (bundled && bundled.tenant_host) || (cached && cached.tenant_host) || null;
+  var here = window.location.host || '';
+  var local = window.location.protocol === 'file:' || /^(app|widget|palm):/.test(window.location.protocol) || !here;
+  API.bundled = !!bundled && (local || (host && host !== here));
+  if (host && (local || host !== here)) { API.base = 'http://' + host; API.tenant = host; }
+  else { API.base = ''; API.tenant = null; }
+  log('origin ' + (window.location.origin || window.location.protocol + '//' + here) + (API.base ? ' → server ' + API.base + ' (bundled app)' : ' (served by the tenant host)'));
+}
+// State for a set that has never registered, from the bundled snapshot: the tenant's default
+// layout and lineup, blank guest, no apps; the licences so Netflix can still be activated.
+function stateFromBundle(b) {
+  var room = state.props.room_number && !/^\[TV\]/i.test(state.props.room_number) ? state.props.room_number : '';
+  var layout = b.default_layout_id && b.layouts && b.layouts[b.default_layout_id] ? b.layouts[b.default_layout_id] : null;
+  var lineup = b.default_lineup_id && b.lineups && b.lineups[b.default_lineup_id] ? b.lineups[b.default_lineup_id].channels : [];
+  var ctx = {}; for (var k in (b.context || {})) ctx[k] = b.context[k];
+  ctx.room = room; ctx.serial = state.props.serial_number || ''; ctx.guest = ctx.guest || ''; ctx.guest_first = ''; ctx.guest_last = ''; ctx.checkin_date = ''; ctx.checkout_date = ''; ctx.nights = '';
+  return { context: ctx, layout: layout || localLayout('Waiting for the server (' + (b.tenant_host || '?') + ')\nThis set has not been registered yet.'), lineup: lineup, messages: [], apps: [], activation: b.activation || null, poll_interval_s: b.poll_interval_s || 60, ws_url: '/ws/tv' };
+}
+// Boot: draw from cache or bundle immediately, then keep trying the server.
+function offlineFirst() {
+  var cached = loadCache();
+  return fetchJson('./bundle.json', 2000).then(function (bj) {
+    if (bj && bj.version != null) API.bundleVersion = Number(bj.version);
+    return fetchJson('./state.json', 3000);
+  }).then(function (bundled) {
+    configureApi(bundled, cached);
+    if (cached) {
+      state.setId = cached.set_id || null; state.token = cached.token || null; state.cachedAt = cached.saved_at || null; state.source = 'cache';
+      applyState(cached, { offline: true });
+      log('running from cache (' + (cached.saved_at || '?') + ') until the server answers');
+      showStatus(false);
+    } else if (bundled) {
+      state.source = 'bundle';
+      applyState(stateFromBundle(bundled), { offline: true });
+      log('running from the bundled state.json (' + (bundled.generated_at || '?') + ') until the server answers');
+      showStatus(false);
+    } else state.source = 'none';
+    sendEvent('boot', { origin: (window.location && window.location.origin) || null, source: state.source, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt });
+  });
 }
 
 // ---------------------------------------------------------------- commands
@@ -744,7 +834,7 @@ function connectWs() {
   if (!state.wsUrl || typeof WebSocket === 'undefined') return;
   if (state.wsTimer) { clearTimeout(state.wsTimer); state.wsTimer = null; }
   var proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  var url = proto + window.location.host + state.wsUrl + authQs();
+  var url = (API.base ? API.base.replace(/^http/, 'ws') : proto + window.location.host) + state.wsUrl + authQs() + (API.tenant ? '&tenant=' + encodeURIComponent(API.tenant) : '');
   var ws;
   try { ws = new WebSocket(url); } catch (e) { log('ws error: ' + e.message); scheduleWsReconnect(); return; }
   state.ws = ws;
@@ -783,10 +873,11 @@ function onWsMessage(msg) {
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview, msg.page || null);
       if (msg.preview) log('preview layout from admin');
+      else patchCache({ layout: msg.layout, context: msg.context || state.context, room_number: msg.room_number, group: msg.group, instant_power: msg.instant_power });
       break;
-    case 'lineup': applyLineup(msg.lineup); break;
-    case 'messages': applyMessages(msg.messages); break;
-    case 'apps': applyApps(msg.apps); break;
+    case 'lineup': applyLineup(msg.lineup); patchCache({ lineup: msg.lineup }); break;
+    case 'messages': applyMessages(msg.messages); patchCache({ messages: msg.messages }); break;
+    case 'apps': applyApps(msg.apps); patchCache({ apps: msg.apps }); break;
     case 'command': runCommand(msg.command, ackViaWs); break;
     case 'deleted': log('this set was deleted in admin; re-registering'); state.setId = null; state.token = null; registerLoop(0); break;
     case 'pong': break;
@@ -798,29 +889,37 @@ function onWsMessage(msg) {
 function schedulePoll() {
   if (state.pollTimer) clearTimeout(state.pollTimer);
   state.pollTimer = setTimeout(function () {
-    poll().then(function (data) { applyState(data); schedulePoll(); }, function (err) {
+    poll().then(function (data) { if (state.online === false) { state.online = true; sendEvent('online', { via: 'poll' }); } applyState(data); saveCache(data); schedulePoll(); }, function (err) {
       log('poll failed: ' + err.message);
       if (/HTTP 401/.test(err.message)) { registerLoop(0); return; }
+      if (state.online !== false && !/HTTP \d/.test(err.message)) { state.online = false; sendEvent('offline', { error: err.message, source: 'cache' }); }
       schedulePoll();
     });
   }, state.pollInterval * 1000);
 }
 function registerLoop(attempt) {
+  if (state.registerTimer) { clearTimeout(state.registerTimer); state.registerTimer = null; }
   register().then(function (data) {
     state.setId = data.set_id; state.token = data.token;
     if (state.ws) { try { state.ws.onclose = null; state.ws.close(); } catch (e) {} state.ws = null; }
     showStatus(false);
-    log('registered as set ' + data.set_id + (data.created ? ' (new)' : ''));
+    var wasOffline = state.online === false;
+    state.online = true; state.source = 'server';
+    log('registered as set ' + data.set_id + (data.created ? ' (new)' : '') + (wasOffline ? ' — server is back' : ''));
     applyState(data);
+    saveCache(data);
+    if (wasOffline) sendEvent('online', { after_attempts: attempt });
     schedulePoll();
     refreshWeather();
     if (state.weatherTimer) clearInterval(state.weatherTimer);
     state.weatherTimer = setInterval(refreshWeather, 15 * 60 * 1000);
   }, function (err) {
     var wait = REGISTER_RETRY_MS[Math.min(attempt, REGISTER_RETRY_MS.length - 1)];
-    showStatus(true);
-    log('register failed: ' + err.message + ' — retry in ' + (wait / 1000) + 's');
-    setTimeout(function () { registerLoop(attempt + 1); }, wait);
+    var haveLayout = !!state.layout;
+    if (state.online !== false) { state.online = false; sendEvent('offline', { error: err.message, source: state.source }); }
+    showStatus(!haveLayout);   // with a cached/bundled layout on screen the guest sees nothing of this
+    log('register failed: ' + err.message + ' — retry in ' + (wait / 1000) + 's' + (haveLayout ? ' (running from ' + state.source + ')' : ''));
+    state.registerTimer = setTimeout(function () { registerLoop(attempt + 1); }, wait);
   });
 }
 function localLayout(text) {
@@ -1071,7 +1170,7 @@ function boot() {
       else { state.layout = localLayout('No LG middleware and no ?serial=… given.\nOpen this page on a Pro:Centric set, or add ?serial=TEST to simulate one.'); render(); return; }
     }
     log('serial ' + (state.props.serial_number || '?') + ' · ' + (state.props.model_name || '?'));
-    registerLoop(0);
+    return offlineFirst().then(function () { registerLoop(0); });
   });
 }
 window.addEventListener('resize', function () { if (state.layout) render(); });
@@ -1084,4 +1183,4 @@ document.addEventListener('DOMContentLoaded', boot);
   if (missing.length || extra.length) log('ERROR zone types out of sync: missing ' + missing.join(',') + ' extra ' + extra.join(','));
 })();
 // Test hook (read-only view of state).
-window.__cc = { state: state, tuneTo: tuneTo, findChannel: findChannel, render: render, doAction: doAction, focusTargets: focusTargets, zoneTypes: Object.keys(RENDERERS) };
+window.__cc = { state: state, api: API, tuneTo: tuneTo, findChannel: findChannel, render: render, doAction: doAction, focusTargets: focusTargets, zoneTypes: Object.keys(RENDERERS), registerNow: function () { registerLoop(0); } };

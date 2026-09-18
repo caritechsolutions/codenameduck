@@ -67,6 +67,8 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
       insertEvent.run(tenant.id, set.id, created ? 'register_new' : 'register',
         JSON.stringify({ api, model: fields.model, firmware: fields.firmware_version, ip: fields.ip, app_version: fields.app_version }));
       if (instantPower != null) db.prepare('UPDATE sets SET instant_power = ? WHERE id = ?').run(instantPower, set.id);
+      // Part D: where the page runs from (file:// or the TV's local origin in deploy mode) and which bundle
+      db.prepare('UPDATE sets SET origin = COALESCE(?, origin), bundle_version = ? WHERE id = ?').run(str(b.origin), Number.isInteger(Number(b.bundle_version)) && b.bundle_version !== null && b.bundle_version !== '' ? Number(b.bundle_version) : null, set.id);
       set = findSetById.get(set.id, tenant.id);
     })();
 
@@ -105,7 +107,7 @@ function createTvRouter({ db, state, commands, hub, screenshots, weather, apps =
       }
     }
 
-    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}${country != null ? ` country=${country}` : ''}`);
+    log(`${tenant.name}: ${created ? 'NEW set' : 'register'} serial=${serial} model=${fields.model || '?'} api=${api || '?'} room=${set.room_number || '-'} reported=${reported || '-'} ip=${fields.ip}${appsSeen ? ` apps=${appsSeen}` : ''}${country != null ? ` country=${country}` : ''}${b.origin ? ` origin=${String(b.origin).slice(0, 80)}` : ''}${b.bundle_version != null ? ` bundle=v${b.bundle_version}` : ''}`);
     res.json({ ...state.build(tenant, set), token: set.token, created });
   });
 

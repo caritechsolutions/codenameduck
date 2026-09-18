@@ -24,12 +24,14 @@ const { createLicencesRouter } = require('./routes/licences');
 const { createWeather } = require('./weather');
 const { createPms } = require('./pms');
 const { createPmsAdminRouter, createPmsApiRouter } = require('./routes/pms');
+const { createBundler } = require('./bundle');
+const { createDeployRouter } = require('./routes/deploy');
 
 function timestamp() { return new Date().toISOString(); }
 
 // Builds the Express app + HTTP server + WebSocket hub. Returns { app, server, hub, ... }.
 // Tests call this with an in-memory DB and a temp tenants dir.
-function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log, weatherFetch = undefined, tenantCommand = defaultTenantCommand, scheduler = true, now = undefined }) {
+function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS = 60, log = console.log, weatherFetch = undefined, tenantCommand = defaultTenantCommand, scheduler = true, now = undefined, publicHost = null }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', 'loopback');
@@ -55,6 +57,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   const assets = createAssetStore(tenantsDir);
   const media = createMediaStore(db, tenantsDir, { log: logger });
   const weather = createWeather({ fetcher: weatherFetch, log: logger });
+  const bundler = createBundler({ db, tenantsDir, apps, state, publicHost, log: logger });
 
   const seeded = seedSuperadmin(db);
   if (seeded) {
@@ -71,6 +74,17 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
 
   app.use(express.json({ limit: '1mb' }));
 
+  // Part D: a bundled app runs from the TV's local storage (another origin), so the TV API is
+  // CORS-open — the set token authenticates, never the origin. The tenant comes from the
+  // X-CC-Tenant header the renderer sends (baked into state.json), falling back to Host.
+  app.use('/api/tv', (req, res, next) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Accept, X-CC-Tenant');
+    res.set('Access-Control-Max-Age', '600');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    next();
+  });
   app.use('/api', tenants.middleware);
   app.use('/api', (_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   app.use('/api/tv', createTvRouter({ db, state, commands, hub, screenshots, weather, apps, log: logger }));
@@ -82,11 +96,18 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   admin.use(createAppsRouter({ db, hub, apps, commands, log: logger }));
   admin.use(createLicencesRouter({ auth, licences, hub, db, log: logger }));
   admin.use(createPmsAdminRouter({ pms, log: logger }));
+  admin.use(createDeployRouter({ bundler, log: logger }));
   app.use('/api/admin', admin);
   app.use('/api', (_req, res) => res.status(404).json({ error: 'not found' }));
 
   // Admin UI: built Vite bundle when present, placeholder until then.
   app.use('/admin', tenants.middleware);
+  // Part D: which build a tenant runs (for NPM health checks and a quick look from a browser).
+  app.get('/admin/status', (req, res) => {
+    const st = bundler.status(req.tenant);
+    res.set('Cache-Control', 'no-store').json({ ok: true, tenant: req.tenant.name, hostname: req.tenant.hostname, mode: st.mode, build: st.deployed_build, bundle_version: st.bundle_version,
+      bundle_build: st.bundle_build, bundle_built_at: st.bundle_built_at, xait: st.xait, sets: st.sets, pending_sets: st.pending_sets.length, server_time: timestamp() });
+  });
   if (adminDist && fs.existsSync(path.join(adminDist, 'index.html'))) {
     app.use('/admin', express.static(adminDist, { index: 'index.html', maxAge: '1h', setHeaders(res, p) { if (p.endsWith('index.html')) res.set('Cache-Control', 'no-store'); } }));
     app.get('/admin/*', (_req, res) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.join(adminDist, 'index.html')); });
@@ -110,6 +131,9 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
   hub.attach(server);
   const expireTimer = setInterval(() => { try { commands.expire(); } catch { /* ignore */ } }, 3600000);
   expireTimer.unref();
+  // Part D: tenants in remote-deploy mode get a fresh bundle when the deployed renderer or media
+  // changed (install.sh deploys tv-app then restarts the service).
+  if (scheduler) setTimeout(() => { try { const r = bundler.autoPublish(); if (r.length) logger(`bundles published at startup: ${r.map((x) => `${x.tenant} v${x.version}`).join(', ')}`); } catch (e) { logger(`bundle auto-publish failed: ${e.message}`); } }, 1000).unref();
   // PMS scheduler: check guests in/out at the tenants' local times; once at startup to catch up.
   if (scheduler) {
     const runTick = () => { try { const r = pms.tick(); if (r.checkins || r.checkouts || r.expired) logger(`pms tick: ${r.checkins} check-in(s), ${r.checkouts} check-out(s), ${r.expired} expired`); } catch (e) { logger(`pms tick failed: ${e.stack || e}`); } };
@@ -118,7 +142,7 @@ function createServer({ db, tenantsDir, adminDist, dataDir = null, pollIntervalS
     pmsTimer.unref();
   }
 
-  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, licences, weather, pms, seeded, log: logger };
+  return { app, server, hub, commands, state, auth, tenants, assets, media, apps, licences, weather, pms, bundler, seeded, log: logger };
 }
 
 function escapeHtml(s) {

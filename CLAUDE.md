@@ -530,3 +530,45 @@ Decisions already made (do not re-open):
   apps even while hidden from the list, and fails for unknown ids.
 - Admin set drawer: event rows expand to the full pretty JSON with a Copy button (`EventRow`).
 - `docs/lg/netflix.md` records the observed status replies.
+
+### Part D — remote-deploy bundle, offline-first renderer (2026-09-18)
+
+- Migration 014: `tenants.deploy_mode run|deploy`, `bundle_version/hash/build/built_at`;
+  `sets.bundle_version`, `sets.origin`.
+- `server/src/bundle.js` `createBundler({db, tenantsDir, apps, state, publicHost})`: `collect()` =
+  renderer files in the tenant's application dir (`index.html`, `probe.html`, `app.<hash>.js`,
+  `version.txt`, `zones.css`, `lib/**`, `fonts/**`) + `media/**` (no thumbs); `snapshot()` =
+  `state.json` (`tenant_host`, tenant context, layouts by id, lineups by id with channels, groups
+  with layout/lineup/apps, defaults, `activation` incl. tokens, checkout_message); `diff()`
+  (added/changed/removed vs `bundle.manifest.json`, `bump`, `state_changed`); `publish()` writes
+  `app.zip` (`server/src/zip.js`, deflate/store, fixed timestamps) + `state.json` + `bundle.json` +
+  manifest, bumps `bundle_version` (+1, wrap 65535 → 1) **only** when the content hash of renderer
+  + media changed, rewrites `xait.xml` in deploy mode (`xaitXml()`: `<url>…/app.zip</url>` +
+  `<applicationStructure>` baseDirectory `/`, classpathExtension `/`, initialClass `index.html`;
+  both version fields = bundle version); `changeMode('deploy')` publishes + writes the deploy
+  xait, `changeMode('run')` writes the run xait with version+1 so TVs reload the live page;
+  `autoPublish()` at startup for deploy-mode tenants. `server/src/cli.js bundle|mode|status`
+  (`coopcentric-tenant bundle <name>|--all`, `mode <name> run|deploy`; install.sh runs
+  `bundle --all` after deploying tv-app).
+- Routes: `GET /api/admin/deployment`, `GET /deployment/diff`, `POST /deployment/publish`,
+  `PUT /deployment/mode`; `GET /admin/status` (no auth: mode, build, bundle version, pending sets).
+- Cross-origin: `/api/tv/*` answers CORS `*` (+ OPTIONS); the tenant resolver honours
+  `X-CC-Tenant` on `/api/tv` only, the WS upgrade a `tenant=` query param; auth stays the set token.
+  Register body carries `origin`, `bundle_version`, `source` (server logs origin + bundle).
+- Renderer: `API {base, tenant, bundled, bundleVersion}` — `offlineFirst()` reads `./bundle.json`
+  and `./state.json` (relative, so they come from the zip when bundled), `configureApi()` picks the
+  server (`tenant_host` from state.json/cache when the page origin is not the tenant host),
+  `loadCache()`/`saveCache()` keep the last register answer in `localStorage.cc_state` (minus
+  commands, plus set_id/token/tenant_host); boot draws from cache → bundle → nothing, then
+  `registerLoop` retries 5/10/20/30/60 s forever, marks `state.online`, sends `boot`/`offline`/
+  `online` events; the status overlay stays hidden while a layout is on screen. `mediaUrl()` maps
+  `/procentric/application/{media,assets,fonts}/…` to `./…` in a bundled app (server URL as
+  `onerror` fallback) via `env.mediaUrl/mediaFallback` in `shared/zone-draw.js` (`mediaImg()`).
+  `window.__cc.registerNow()` for tests.
+- Admin: Settings → Deployment card (mode radios with confirm, bundle/xait status, Show changes
+  modal, Publish bundle); Sets table "App" column (build, `bundle vN` / `bundle vN pending`,
+  `local` when the origin is not http). Harness: `startStack({serveTenantDir})`, `setOffline()`,
+  `startOtherOrigin()`.
+- Unverified on hardware: the exact `location.origin` of a locally stored app (logged in the
+  `tv_boot` event), whether `<applicationStructure>` belongs inside `<HcapDescriptor>` (where the
+  server puts it), and whether a TV with a stored version N accepts a run-mode xait with N+1.

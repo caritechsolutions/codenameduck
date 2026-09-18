@@ -4,7 +4,9 @@
 #   coopcentric-tenant new <name> <hostname>   create tenant tree, vhost, xait.xml; deploy tv-app
 #   coopcentric-tenant list                    show tenants, hostnames, xait versions, vhost state
 #   coopcentric-tenant deploy [<name>]         (re)deploy tv-app into one or every tenant
-#   coopcentric-tenant bump <name>             increment xait versionNumber and Application/version
+#   coopcentric-tenant bump <name>             increment xait versionNumber and Application/version (run mode)
+#   coopcentric-tenant bundle <name>|--all      build/publish the tenant's app.zip (remote-deploy bundle)
+#   coopcentric-tenant mode <name> run|deploy   switch the tenant between remote-run and remote-deploy
 #   coopcentric-tenant vhost <name> [--adopt]  re-render the nginx vhost from the current template;
 #                                              --adopt replaces a hand-made vhost (backup kept)
 #   coopcentric-tenant remove <name> [--yes]   disable vhost, delete vhost file and tenant tree
@@ -299,6 +301,36 @@ cmd_bump() {
   log "TVs pick this up on their next power-off/power-on cycle"
 }
 
+# Part D: the bundle and the deployment mode live in the server (database + node); run its CLI as
+# the service user so files and the DB keep their owner.
+server_cli() {
+  local cli="$COOPCENTRIC_HOME/server/src/cli.js"
+  [ -f "$cli" ] || die "server CLI missing: $cli"
+  command -v node >/dev/null 2>&1 || die "node not installed"
+  local data="${COOPCENTRIC_DATA:-$COOPCENTRIC_ROOT/data}"
+  if [ "$(id -u)" -eq 0 ] && id www-data >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
+    runuser -u www-data -- env COOPCENTRIC_DATA="$data" COOPCENTRIC_TENANTS="$TENANTS_DIR" node "$cli" "$@"
+  else
+    COOPCENTRIC_DATA="$data" COOPCENTRIC_TENANTS="$TENANTS_DIR" node "$cli" "$@"
+    # ran as the current user: give the tenant tree (and the DB) back to the service user
+    if [ "$(id -u)" -eq 0 ] && id www-data >/dev/null 2>&1; then chown -R www-data:www-data "$data" 2>/dev/null || true; fi
+  fi
+}
+cmd_bundle() {
+  [ $# -ge 1 ] || usage 1
+  if [ "$1" != "--all" ]; then tenant_exists "$1" || die "no such tenant: $1"; fi
+  server_cli bundle "$@"
+  if [ "$1" = "--all" ]; then local d; for d in "$TENANTS_DIR"/*/; do [ -d "$d" ] && fix_owner "$(app_dir "$(basename "$d")")" 2>/dev/null || true; done; else fix_owner "$(app_dir "$1")" 2>/dev/null || true; fi
+}
+cmd_mode() {
+  [ $# -eq 2 ] || usage 1
+  tenant_exists "$1" || die "no such tenant: $1"
+  case "$2" in run|deploy) ;; *) die "mode must be run or deploy" ;; esac
+  server_cli mode "$1" "$2"
+  fix_owner "$(app_dir "$1")" 2>/dev/null || true
+  log "TVs pick the new xait up on their next power-off/power-on cycle"
+}
+
 cmd_remove() {
   need_root
   [ $# -ge 1 ] || usage 1
@@ -352,6 +384,8 @@ main() {
     list|ls) cmd_list "$@" ;;
     deploy)  cmd_deploy "$@" ;;
     bump)    cmd_bump "$@" ;;
+    bundle)  cmd_bundle "$@" ;;
+    mode)    cmd_mode "$@" ;;
     vhost)   cmd_vhost "$@" ;;
     remove|rm) cmd_remove "$@" ;;
     -h|--help|help|"") usage 0 ;;

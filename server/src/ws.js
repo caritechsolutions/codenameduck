@@ -31,7 +31,7 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
       let url;
       try { url = new URL(req.url, 'http://x'); } catch { socket.destroy(); return; }
       if (url.pathname !== '/ws/tv') { socket.destroy(); return; }
-      const tenant = tenants.resolve(req.headers.host);
+      const tenant = (url.searchParams.get('tenant') && tenants.resolve(url.searchParams.get('tenant'))) || tenants.resolve(req.headers.host);   // Part D: bundled app names its tenant
       const setId = Number(url.searchParams.get('set_id'));
       const token = url.searchParams.get('token') || '';
       const set = tenant && Number.isInteger(setId) && setId > 0 ? findSet.get(setId, tenant.id) : null;
@@ -191,8 +191,10 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
   }
 
   function closeAll() { for (const c of conns.values()) { try { c.ws.terminate(); } catch { /* ignore */ } } conns.clear(); wss.close(); }
+  // Drop every connection but keep accepting new ones (tests simulate a server outage).
+  function dropAll() { for (const c of conns.values()) { try { c.ws.terminate(); } catch { /* ignore */ } } conns.clear(); }
 
-  return { attach, send, isConnected, connectedSetIds, refresh, preview, closeAll, recordTvEvent,
+  return { attach, send, isConnected, connectedSetIds, refresh, preview, closeAll, dropAll, recordTvEvent,
     setCommands(c) { commands = c; }, get size() { return conns.size; } };
 }
 

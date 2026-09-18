@@ -33,7 +33,7 @@ function normalizeAppList(raw) {
 // "notRequired" | ... }. `auth` is read first (it is the first key below); the words cover replies
 // without it and older shapes.
 const YES = /^(registered|activated|authorized|authorised|authsuccess|notrequired|ok|success|true|yes|valid|done|1)$/i;
-const NO = /^(unregistered|not[_ ]?registered|unactivated|unauthorized|unauthorised|authfail(ed|ure)?|fail(ed|ure)?|false|no|invalid|none|error|0)$/i;
+const NO = /^(unregistered|not[_ ]?registered|unactivated|unauthorized|unauthorised|authneeded|authfail(ed|ure)?|fail(ed|ure)?|false|no|invalid|none|error|0)$/i;
 function normalizeAuth(raw) {
   if (raw == null) return { activated: null, status: null };
   if (typeof raw === 'boolean') return { activated: raw, status: String(raw) };

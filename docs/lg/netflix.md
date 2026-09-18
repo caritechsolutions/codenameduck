@@ -76,7 +76,7 @@ by app id, never derived from the list. Observed shapes:
 | Reply | Meaning |
 |---|---|
 | `{ auth: true, auth_status: "authSuccess" }` | token registered, app activated |
-| `{ auth: false, ... }` | not activated → register the token |
+| `{ auth: false, auth_status: "authNeeded" }` | not activated → register the token |
 | `{ auth_status: "notRequired" }` | the app needs no token (YouTube, browser, …) |
 | onFailure `IDCAP_RESULT_FAILURE` | the id is unknown to the set (e.g. `airplay`) |
 
@@ -85,3 +85,13 @@ reply for a licensed id means the token is registered (one `application/register
 waiting for its `application_registration_result_received`, whose `tokenResult` is the string
 `"success"` or `"fail"`). **Re-registering an already authorised app resets its sign-in** on
 the set — the reason registration is driven by this status and nothing else.
+
+### Power-off finding (2026-09-18)
+
+A power-off/on by itself does **not** sign Netflix out. The sign-in was lost on every reboot
+only because the renderer re-registered the token at each boot (B3d/B3e): re-registering an
+already authorised app resets its state. With registration driven by `register/status`
+(`auth === true` → leave the app alone) the sign-in survives reboots. Status words seen so far:
+`authNeeded` (register the token), `authSuccess` (activated), `notRequired` (no token for this
+app). LG's checkout (`tv/checkout/request`) is what signs the guest out — Part C uses it at
+check-out.

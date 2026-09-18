@@ -175,6 +175,9 @@ main() {
   if [ "$count" -gt 0 ]; then
     log "deploying tv-app into $count tenant(s)"
     COOPCENTRIC_HOME="$HOME_DIR" COOPCENTRIC_ROOT="$ROOT_DIR" "$BIN_DIR/coopcentric-tenant" deploy
+    # Part D: tenants in remote-deploy mode get a fresh app.zip from the just-deployed renderer
+    # (the service also does this at startup; running it here keeps the bundle and the service in step).
+    COOPCENTRIC_HOME="$HOME_DIR" COOPCENTRIC_ROOT="$ROOT_DIR" "$BIN_DIR/coopcentric-tenant" bundle --all || warn "bundle rebuild failed (see above); deploy-mode tenants keep their previous app.zip"
   else
     log "no tenants yet — create one with: sudo coopcentric-tenant new <name> <hostname>"
   fi

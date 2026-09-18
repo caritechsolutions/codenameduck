@@ -140,12 +140,39 @@ on save/import with a clear message.
 
 ---
 
-## Part D — deploy/operational
+## Part D — offline-capable deployment (remote-deploy mode)
 
-- `install.sh` unchanged in usage; must add `sharp` and any new deps.
-- Migration for rooms/pms_log/apps/media.
-- Tenant landing `/` → `/admin` already; add `/admin/status` public-less health for NPM checks
-  (returns 200 with build hash) so Richard can see which build a tenant is on.
+Today the TV fetches index.html from the server every boot, so an unreachable server means no
+portal. Implement LG's remote-deploy mode and make the renderer offline-first:
+
+1. Per-tenant app bundle. On every tv-app build or tenant publish, build
+   `procentric/application/app.zip` containing the renderer (index.html, hashed app.js, lib/,
+   fonts/, shared CSS), the tenant's media library, and `state.json` — a snapshot of everything
+   `/api/tv/register` would return for that tenant (layouts, lineups, apps/licences status,
+   settings). `xait.xml` switches to the remote-deploy form: `<url>` → app.zip,
+   `<applicationStructure>` with `baseDirectory /`, `classpathExtension /`, `initialClass
+   index.html`. Server manages `versionNumber`/`version`: increment both by 1 (wrap at 65535)
+   whenever app.zip content changes; layout/lineup changes do not bump (they're pushed live).
+   Keep remote-run as a per-tenant mode switch (Settings → Deployment: remote-run for
+   development, remote-deploy for production); `coopcentric-tenant` gets `bundle <name>` and
+   `mode <name> run|deploy`.
+2. Renderer offline-first. On boot: render immediately from the last good state in localStorage
+   (fallback: the bundled `state.json`), then try `/api/tv/register`; if the server answers,
+   apply and cache; if not, keep running from cache, retry with backoff, and reconnect WS when it
+   returns. Video, channel zapping, pages, apps and Netflix registration must all work with the
+   server down. Media zones resolve to bundled files first, server URLs second.
+3. Cross-origin. A locally stored app has a different origin than the tenant hostname: verify
+   how webOS reports it (`location.origin` at boot — log it) and configure CORS on `/api/` and
+   `/ws/` to accept it, authenticating by the set token, not by origin. Tenant is resolved from
+   the hostname baked into `state.json` (`tenant_host`) and sent as a header, not from the
+   request Host.
+4. Update path. After publishing a new bundle, TVs pick it up at their next power-off/on (xait
+   comparison) — show per-set app build in the fleet table and a "bundle version pending"
+   indicator. Admin button "Publish bundle" plus a dry-run diff of what changed.
+5. Tests: bundle contents; renderer boots with the server unreachable (Chromium with `/api`
+   blocked) and shows the layout, tunes, and navigates; then the server comes back and state
+   syncs; xait version increments only on bundle change.
+6. Also: `/admin/status` with the build hash.
 
 ---
 

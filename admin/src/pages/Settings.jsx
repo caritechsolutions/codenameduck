@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { get, patch, post, del, api } from '../api.js';
-import { useAsync, Field, useToast } from '../components/ui.jsx';
+import { get, patch, post, put, del, api } from '../api.js';
+import { useAsync, Field, useToast, Modal } from '../components/ui.jsx';
 import { SessionCtx } from '../App.jsx';
 import { timeAgo } from '../util.js';
 import { uploadMedia } from '../components/MediaPicker.jsx';
@@ -81,6 +81,7 @@ export default function Settings() {
             </div>
             <p className="muted small">The logo is stored in the <Link to="/media">Media library</Link> (any library image can be made the logo there). Use it in layouts as an image zone with src <code>{'{{logo}}'}</code>.</p>
           </div>
+          <DeploymentCard toast={toast} />
           <PmsKeyCard toast={toast} />
           {(assets.data || []).length > 0 && <div className="card" style={{ marginTop: 12 }}>
             <h2>Legacy assets</h2>
@@ -116,6 +117,56 @@ function PmsKeyCard({ toast }) {
         <button className="sm" onClick={generate}>{cur ? 'Regenerate key' : 'Generate key'}</button>
         {cur && <button className="sm danger" onClick={revoke}>Revoke</button>}
       </div>
+    </div>
+  );
+}
+
+// Part D: remote-run (TV loads index.html live) vs remote-deploy (TV runs the published app.zip
+// locally and keeps working when the server is down). Publish = build the bundle; the xait
+// version bumps only when renderer files or media changed.
+function DeploymentCard({ toast }) {
+  const dep = useAsync(() => get('/deployment'), []);
+  const [diff, setDiff] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const d = dep.data;
+  async function setMode(mode) {
+    if (!window.confirm(mode === 'deploy' ? 'Switch to remote-deploy? The bundle is published now and every TV downloads it at its next power-off/on.' : 'Switch back to remote-run? TVs load index.html live from the server again at their next power-off/on.')) return;
+    setBusy(true);
+    try { const r = await put('/deployment/mode', { mode }); dep.setData(r.status); toast(mode === 'deploy' ? `Remote-deploy on · bundle v${r.version} published` : `Remote-run on · xait version ${r.version}`); }
+    catch (e) { toast(e.message, 'bad'); } finally { setBusy(false); }
+  }
+  async function showDiff() { try { setDiff(await get('/deployment/diff')); } catch (e) { toast(e.message, 'bad'); } }
+  async function publish() {
+    setBusy(true);
+    try { const r = await post('/deployment/publish', {}); dep.setData(r.status); setDiff(null); toast(r.bumped ? `Bundle v${r.version} published (${r.files} files, ${Math.round(r.bytes / 1024)} kB) — TVs update at their next power-off/on` : 'Bundle refreshed (state.json only) — nothing changed that needs a new version'); }
+    catch (e) { toast(e.message, 'bad'); } finally { setBusy(false); }
+  }
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <h2>Deployment</h2>
+      <p className="muted small">How the TVs get the portal. <b>Remote-run</b>: every boot loads <code>index.html</code> from this server (development). <b>Remote-deploy</b>: the TV downloads <code>app.zip</code> once, runs it from its own storage and keeps working with the server unreachable (production). Either way layouts and lineups are pushed live.</p>
+      {!d ? <div className="muted">Loading…</div> : (
+        <>
+          <div className="inline" style={{ gap: 16 }} role="radiogroup" aria-label="Deployment mode">
+            <label className="inline"><input type="radio" name="deploy-mode" checked={d.mode === 'run'} disabled={busy} onChange={() => setMode('run')} aria-label="Remote-run" /> Remote-run</label>
+            <label className="inline"><input type="radio" name="deploy-mode" checked={d.mode === 'deploy'} disabled={busy} onChange={() => setMode('deploy')} aria-label="Remote-deploy" /> Remote-deploy</label>
+          </div>
+          <table className="small" style={{ marginTop: 10 }}><tbody>
+            <tr><td className="muted">Bundle</td><td data-testid="bundle-version">{d.bundle_version ? `v${d.bundle_version}` : 'not published yet'}{d.bundle_built_at ? ` · built ${timeAgo(d.bundle_built_at)}` : ''}{d.zip_bytes ? ` · ${Math.round(d.zip_bytes / 1024)} kB` : ''}</td></tr>
+            <tr><td className="muted">Renderer build</td><td className="mono">{d.deployed_build || '—'}{d.bundle_build && d.bundle_build !== d.deployed_build ? <span className="pill warn" style={{ marginLeft: 6 }}>bundle has {d.bundle_build}</span> : null}</td></tr>
+            <tr><td className="muted">xait.xml</td><td className="mono">{d.xait ? `versionNumber ${d.xait.versionNumber} · version ${d.xait.version} · ${d.xait.url ? d.xait.url.replace(/^.*\//, '') : '?'}` : '—'}</td></tr>
+            <tr><td className="muted">Sets</td><td>{d.sets} · {d.mode === 'deploy' ? (d.pending_sets.length ? <span className="pill warn" data-testid="pending-sets">{d.pending_sets.length} still on an older bundle</span> : <span className="pill ok">all on v{d.bundle_version}</span>) : <span className="muted">bundle version applies in remote-deploy only</span>}</td></tr>
+          </tbody></table>
+          <div className="actions" style={{ marginTop: 10 }}>
+            <button onClick={showDiff} disabled={busy}>Show changes</button>
+            <button className="primary" onClick={publish} disabled={busy}>Publish bundle</button>
+          </div>
+        </>)}
+      {diff && <Modal title="What a publish would change" onClose={() => setDiff(null)} footer={<><button onClick={() => setDiff(null)}>Close</button><button className="primary" disabled={busy} onClick={publish}>Publish{diff.bump ? ` v${diff.next_version}` : ' (refresh state only)'}</button></>}>
+        <p className="small" data-testid="diff-summary">{diff.bump ? <span className="pill warn">version {diff.current_version} → {diff.next_version}</span> : <span className="pill ok">no version bump</span>} · {diff.files} files, {Math.round(diff.bytes / 1024)} kB · renderer build {diff.build || '?'}{diff.state_changed ? ' · state.json changed (layouts, lineups, settings)' : ''}</p>
+        {['added', 'changed', 'removed'].map((k) => diff[k].length > 0 && <div key={k}><h3>{k} ({diff[k].length})</h3><ul className="small mono" style={{ maxHeight: 160, overflow: 'auto' }}>{diff[k].slice(0, 200).map((f) => <li key={f}>{f}</li>)}</ul></div>)}
+        {!diff.added.length && !diff.changed.length && !diff.removed.length && <p className="muted small">No renderer or media file changed{diff.state_changed ? '; only the offline snapshot (state.json) is refreshed' : ''}.</p>}
+      </Modal>}
     </div>
   );
 }

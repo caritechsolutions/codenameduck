@@ -469,3 +469,43 @@ list + status before the apps zone appears, and only `auth: true` counts as auth
 6. **Order on a slow set.** Time from power-on to the Apps zone: it now waits for the status
    round trips (a few seconds); tell me if it feels long — the tiles could be drawn greyed
    instead of held back.
+
+## Phase 3 Part D — remote-deploy bundle, offline-first renderer
+
+Setup: Settings → Deployment shows *Remote-run*, bundle "not published yet". The tenant's media
+library has at least the logo; a layout with a video zone, a text zone with `{{hotel}}` /
+`{{room}}`, an image zone using a library image, and a second page.
+
+1. **Publish + dry run.** Show changes → lists every renderer file, `media/…`, "version 0 → 1".
+   Publish bundle → "Bundle v1 published"; `ls -l /srv/coopcentric/tenants/hoteldemo/procentric/
+   application/` has `app.zip`, `state.json`, `bundle.json`; `curl http://hoteldemo.caritech.net/
+   admin/status` shows the build and `bundle_version: 1`. Publish again → "refreshed, no version
+   bump". Upload a new image to Media, Show changes → "version 1 → 2".
+2. **Switch to remote-deploy.** Settings → Remote-deploy (confirm) → xait.xml now has
+   `<url>…/app.zip</url>` and the `<applicationStructure>` block with the bundle version in both
+   version fields. Power-cycle the set: it downloads the zip (LG shows a progress bar on first
+   download), the portal appears, the set registers with `origin` = its local origin (Sets → App
+   column shows the build, "bundle v2", and "local"). **Tell me what `location.origin` reads** in
+   the set's `tv_boot` event — LG's docs do not say; the CORS rule accepts any origin.
+3. **Server stopped → power-cycle → portal appears and video plays.** `sudo systemctl stop
+   coopcentric` (nginx may stay up). Power-cycle the set: the portal draws from its cache within a
+   few seconds, the start channel plays, CH± zaps (multicast/RF via IDCAP; HLS from the internet
+   still plays if the CDN is reachable), pages and BACK work, the app tiles are there, Netflix
+   launches. No status overlay, no error text. Then `sudo systemctl start coopcentric`: within a
+   minute the set registers (`tv_online` event with `after_attempts`), the WebSocket connects, and
+   a layout edit is pushed live again.
+4. **Cold boot with no cache.** Factory-reset the set (or clear its app data via a checkout) with
+   the server still stopped: the portal shows the tenant default layout from the bundled
+   `state.json` with the room from the TV property, the default lineup plays; when the server
+   returns it registers and the room's own layout/group arrive.
+5. **Media offline.** With the server stopped the image zone still shows the logo (from the
+   bundle). Sets → drawer: no media errors.
+6. **Update path.** Publish a new bundle (change a media file or deploy a new renderer via
+   install.sh): Sets → App column shows "bundle v3 pending" until the set's next power-off/on,
+   then "bundle v3". Layout changes keep arriving live without a bundle bump.
+7. **Back to remote-run.** Settings → Remote-run: xait url is index.html again with a higher
+   version; the set loads the live page at its next power cycle. Also `sudo coopcentric-tenant
+   mode hoteldemo deploy` and `sudo coopcentric-tenant bundle hoteldemo` do the same from the shell.
+8. **Instant On / WARM.** With Instant On, a remote power-off/on does not reload the app — a real
+   xait check needs a cold boot (AC off) or LG's scheduled power cycle; note which one picked the
+   new bundle up.

@@ -69,9 +69,12 @@ function createTenantResolver(db, tenantsDir, log = () => {}) {
   }
 
   function middleware(req, res, next) {
-    const tenant = resolve(req.headers.host);
+    // TV API only (Part D): a bundled app names its tenant explicitly; the request Host may be
+    // the server's address rather than the tenant hostname.
+    const hdr = req.path.startsWith('/tv/') || req.path === '/tv' ? req.headers['x-cc-tenant'] : null;
+    const tenant = (hdr && resolve(hdr)) || resolve(req.headers.host);
     if (!tenant) {
-      return res.status(404).json({ error: 'unknown tenant', host: normalizeHost(req.headers.host) });
+      return res.status(404).json({ error: 'unknown tenant', host: normalizeHost(hdr || req.headers.host) });
     }
     req.tenant = tenant;
     next();

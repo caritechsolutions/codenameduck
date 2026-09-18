@@ -73,10 +73,18 @@ export function drawText(e, z, ctx) {
   if (hasLiveVars(z.text)) e.setAttribute('data-live-text', '1');
   if (z.style && z.style.valign) e.classList.add('zone-flex');
 }
-export function drawImage(e, z, ctx) {
+// Part D: a bundled app (remote-deploy) serves the media library from its own zip first and the
+// server second. env.mediaUrl(src) rewrites, env.mediaFallback(src) is tried once on error.
+export function mediaImg(src, env) {
+  var img = document.createElement('img');
+  img.src = env && env.mediaUrl ? env.mediaUrl(src) : src; img.alt = '';
+  if (env && env.mediaFallback) img.onerror = function () { if (img.getAttribute('data-fb')) return; img.setAttribute('data-fb', '1'); var fb = env.mediaFallback(src); if (fb && fb !== img.src) img.src = fb; };
+  return img;
+}
+export function drawImage(e, z, ctx, env) {
   var src = substitute(z.src || '', ctx);
   if (!src) { if (ctx && ctx.__preview) e.appendChild(el('div', 'zone-placeholder', 'image')); return; }
-  var img = document.createElement('img'); img.src = src; img.alt = ''; if (z.fit) img.style.objectFit = z.fit; e.appendChild(img);
+  var img = mediaImg(src, env); if (z.fit) img.style.objectFit = z.fit; e.appendChild(img);
 }
 export function drawClock(e, z, ctx) {
   e.setAttribute('data-clock', z.format || 'HH:mm');
@@ -105,7 +113,7 @@ export function drawChannelList(e, z, ctx, env) {
     row.style.height = rowH + 'px'; row.style.lineHeight = rowH + 'px';
     if (start + i === cur && st.highlight) { row.style.background = st.highlight; row.style.color = st.highlightText || '#1a1a1a'; }
     row.appendChild(el('span', 'chnum', String(ch.number)));
-    if (ch.logo_url) { var img = document.createElement('img'); img.src = ch.logo_url; img.alt = ''; img.className = 'chlogo'; row.appendChild(img); }
+    if (ch.logo_url) { var img = mediaImg(ch.logo_url, env); img.className = 'chlogo'; row.appendChild(img); }
     row.appendChild(el('span', 'chname', ch.name));
     list.appendChild(row);
   });
@@ -167,7 +175,7 @@ export function drawApps(e, z, ctx, env) {
     t.style.width = tile + 'px'; t.style.height = Math.round(tile * 0.75) + 'px';
     if (i === focused && st.highlight) { t.style.boxShadow = '0 0 0 6px ' + st.highlight; }
     var ic = el('div', 'appicon');
-    if (it.icon) { var img = document.createElement('img'); img.src = substitute(it.icon, ctx); img.alt = ''; ic.appendChild(img); }
+    if (it.icon) { ic.appendChild(mediaImg(substitute(it.icon, ctx), env)); }
     else ic.appendChild(el('span', 'appinitial', String(it.label || '?').charAt(0).toUpperCase()));
     t.appendChild(ic);
     t.appendChild(el('div', 'appname', it.label));
@@ -179,7 +187,7 @@ export function drawApps(e, z, ctx, env) {
 // Button: label + optional icon, focusable; focusStyle applies while focused.
 export function drawButton(e, z, ctx) {
   e.classList.add('zone-button');
-  if (z.icon) { var img = document.createElement('img'); img.className = 'btn-icon'; img.src = substitute(z.icon, ctx); img.alt = ''; e.appendChild(img); }
+  if (z.icon) { var img = mediaImg(substitute(z.icon, ctx), env); img.className = 'btn-icon'; e.appendChild(img); }
   e.appendChild(el('span', 'btn-label', substitute(z.label || z.text || '', ctx)));
 }
 
@@ -234,7 +242,7 @@ export function renderStage(stage, layout, ctx, env, pageId, opts) {
   layout = layout || {};
   var canvas = layout.canvas || {};
   stage.style.background = canvas.background || '#000';
-  stage.style.backgroundImage = canvas.backgroundImage ? 'url(' + canvas.backgroundImage + ')' : 'none';
+  stage.style.backgroundImage = canvas.backgroundImage ? 'url(' + (env && env.mediaUrl ? env.mediaUrl(canvas.backgroundImage) : canvas.backgroundImage) + ')' : 'none';
   applyFocusRing(stage, layout);
   Array.prototype.slice.call(stage.querySelectorAll('.zone')).forEach(function (n) { stage.removeChild(n); });
   var skipped = [];

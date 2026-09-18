@@ -9,6 +9,7 @@ import BulkBar from '../components/BulkBar.jsx';
 export default function Sets() {
   const { id } = useParams();
   const nav = useNavigate();
+  const deployment = useAsync(() => get('/deployment').catch(() => null), []);
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('all');
   const sets = useAsync(() => get('/sets'), []);
@@ -47,7 +48,7 @@ export default function Sets() {
       <div className="card" style={{ padding: 0 }}>
         {sets.data && rows.length === 0 ? <Empty>{sets.data.length ? 'No sets match.' : 'No sets yet. A TV registers itself the first time it loads the app.'}</Empty> : (
           <table>
-            <thead><tr><th style={{ width: 30 }}><input type="checkbox" aria-label="select all" checked={rows.length > 0 && rows.every((r) => checked.includes(r.id))} onChange={(e) => setChecked(e.target.checked ? rows.map((r) => r.id) : [])} /></th><th>Status</th><th>Room</th><th>Serial</th><th>Model</th><th>Group</th><th>API</th><th>Firmware</th><th>IP</th><th>Last seen</th></tr></thead>
+            <thead><tr><th style={{ width: 30 }}><input type="checkbox" aria-label="select all" checked={rows.length > 0 && rows.every((r) => checked.includes(r.id))} onChange={(e) => setChecked(e.target.checked ? rows.map((r) => r.id) : [])} /></th><th>Status</th><th>Room</th><th>Serial</th><th>Model</th><th>Group</th><th>API</th><th>Firmware</th><th>App</th><th>IP</th><th>Last seen</th></tr></thead>
             <tbody>
               {rows.map((s) => (
                 <tr key={s.id} className={'clickable' + (selected && selected.id === s.id ? ' selected' : '')} onClick={() => nav(`/sets/${s.id}`)}>
@@ -59,6 +60,7 @@ export default function Sets() {
                   <td>{s.group_name || <span className="pill warn">no group</span>}</td>
                   <td>{s.api ? s.api.toUpperCase() : '—'}{s.idpn ? <span className="muted small"> IDPN {s.idpn}</span> : null}</td>
                   <td className="small">{s.firmware_version || '—'}</td>
+                  <td className="small"><AppBuild set={s} deployment={deployment.data} /></td>
                   <td className="mono small">{s.ip || '—'}</td>
                   <td className="muted small">{timeAgo(s.last_seen)}</td>
                 </tr>))}
@@ -174,5 +176,21 @@ function EventRow({ ev }) {
         <pre className="code small" style={{ maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{text || '(no payload)'}</pre>
       </td></tr>}
     </>
+  );
+}
+
+// Part D: the renderer build a set runs and, in remote-deploy mode, whether it has the current
+// bundle (TVs pick a new bundle up at their next power-off/on).
+function AppBuild({ set, deployment }) {
+  const build = set.app_version ? String(set.app_version).split('-')[0] : null;
+  const pending = deployment && deployment.mode === 'deploy' && (set.bundle_version || 0) !== (deployment.bundle_version || 0);
+  return (
+    <span data-testid="app-build">
+      <span className="mono" title={set.app_version || ''}>{build || '—'}</span>
+      {deployment && deployment.mode === 'deploy' && (pending
+        ? <span className="pill warn" style={{ marginLeft: 6 }} title={`set runs bundle v${set.bundle_version || 0}, current is v${deployment.bundle_version}; updates at its next power-off/on`}>bundle v{deployment.bundle_version} pending</span>
+        : <span className="pill ok" style={{ marginLeft: 6 }}>bundle v{set.bundle_version || 0}</span>)}
+      {set.origin && /^(file:|app:)/.test(set.origin) && <span className="muted small" style={{ marginLeft: 6 }} title={set.origin}>local</span>}
+    </span>
   );
 }

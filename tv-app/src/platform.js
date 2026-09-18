@@ -35,6 +35,7 @@ var hcapMedia = null;
 
 function emit(name, arg) { (listeners[name] || []).forEach(function (fn) { try { fn(arg); } catch (e) { /* listener error */ } }); }
 export function on(name, fn) { (listeners[name] = listeners[name] || []).push(fn); }
+export function off(name, fn) { listeners[name] = (listeners[name] || []).filter(function (f) { return f !== fn; }); }
 export function getApi() { return api; }
 
 function withTimeout(ms, run, resolve, reject) {

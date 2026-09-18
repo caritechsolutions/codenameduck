@@ -49,7 +49,17 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
         case 'idcap://power/powermode/get': ok({ mode: f.powerMode }); break;
         case 'idcap://power/powermode/set': f.powerMode = p.mode; ok(); break;
         case 'idcap://application/launch': f.launched.push(p); ok(); break;
-        case 'idcap://application/register/status': ok({ id: p.id, status: (f.appAuth || {})[p.id] || 'registered' }); break;
+        case 'idcap://application/register/status': {
+          // 43UM670H0UA: { auth: true|false, auth_status: "authSuccess" | "notRequired" | ... }; asking
+          // for an app the set does not know fails. Controlled apps answer even while absent from
+          // application/list.
+          var a = f.appAuth || {};
+          var known = (f.appList || [{ id: 'netflix' }, { id: 'youtube.leanback.v4' }, { id: 'amazon' }, { id: 'com.webos.app.browser' }]).some(function (x) { return x.id === p.id; });
+          if (p.id in a) ok({ id: p.id, auth: a[p.id] === 'registered', auth_status: a[p.id] === 'registered' ? 'authSuccess' : 'authFail' });
+          else if (known) ok({ id: p.id, auth: true, auth_status: 'notRequired' });
+          else fail('IDCAP_RESULT_FAILURE');
+          break;
+        }
         case 'idcap://application/register': {
           f.registered = (f.registered || []).concat([p]);
           // Real 43UM670H0UA: one application_registration_result_received per token, tokenResult

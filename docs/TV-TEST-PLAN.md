@@ -441,3 +441,31 @@ sign-in. Now a token is registered only for an app whose `register/status` says 
    the drawer no longer shows `channel_changed IDCAP_RESULT_FAILURE` as the last error; the
    events list has a `tv_channel_event {ignored: true}` instead. A real tune failure on a tuner
    channel still reports `tv_error`.
+
+## Phase 3 Part B3e — status by licensed id, sequential registration
+
+Background: `register/status` was only asked for apps in `application/list`; LG hides
+controlled apps from the list until they are registered, so Netflix and Prime Video read
+`status: null` and were never registered by the rule from B3d. Now status is asked by licensed
+app id (the licences on file), the boot runs status → register (one token at a time) → re-read
+list + status before the apps zone appears, and only `auth: true` counts as authorised.
+
+1. **Fresh set (or after LG's checkout) — one registration.** Events in order:
+   `tv_apps_status` with **only** the licensed ids (netflix, amazon, airplay…), never YouTube
+   or the browser; `tv_apps_registration_reason` with `in_list: false`, `status.auth: false`
+   and `sending` = just the unauthorised ids; one `tv_apps_registration` whose `results` list
+   `tokenResult: "success"` per token; then `tv_apps_list` and a second `tv_apps_status` with
+   `auth: true`. The Apps zone on the set appears only after that.
+2. **Two more cold boots.** No `tv_apps_registration`, no `tv_apps_registration_reason`
+   with `sending` non-empty (it may say `skipped: every licensed app reports auth: true`), and
+   Netflix is still signed in.
+3. **Event drawer.** Sets → the set → Recent events: click a row → the full JSON opens with a
+   *Copy JSON* button; paste it in the chat if anything looks off.
+4. **Register now (Apps → Activation).** With everything authorised the command acks
+   `{ok: true, skipped: "every licensed app reports auth: true"}` and LG is not called.
+5. **AirPlay.** `tv_apps_status.airplay` shows `{error: "IDCAP_RESULT_FAILURE"}`; it is
+   registered once, answers `"fail"`, the licence row reads "failed on 43UM670H0UA" and is not
+   retried on the next boot.
+6. **Order on a slow set.** Time from power-on to the Apps zone: it now waits for the status
+   round trips (a few seconds); tell me if it feels long — the tiles could be drawn greyed
+   instead of held back.

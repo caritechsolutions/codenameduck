@@ -138,7 +138,7 @@ function SetDrawer({ set, groups, layouts, lineups, onClose, onChanged, onDelete
 
       <div className="section">
         <h3>Recent events</h3>
-        {detail && detail.events.length ? <table><tbody>{detail.events.slice(0, 12).map((e) => <tr key={e.id}><td className="muted small" style={{ whiteSpace: 'nowrap' }}>{timeAgo(e.created_at)}</td><td><span className="pill">{e.type}</span></td><td className="small mono">{e.payload ? JSON.stringify(e.payload).slice(0, 80) : ''}</td></tr>)}</tbody></table> : <div className="muted small">No events.</div>}
+        {detail && detail.events.length ? <table><tbody>{detail.events.slice(0, 30).map((e) => <EventRow key={e.id} ev={e} />)}</tbody></table> : <div className="muted small">No events.</div>}
       </div>
 
       <div className="section">
@@ -148,5 +148,31 @@ function SetDrawer({ set, groups, layouts, lineups, onClose, onChanged, onDelete
       </div>
       {confirm && <Confirm title="Delete set" text={`Delete ${set.serial}${set.room_number ? ` (room ${set.room_number})` : ''}? This cannot be undone.`} onConfirm={remove} onClose={() => setConfirm(false)} />}
     </Drawer>
+  );
+}
+
+// One event: click to expand the full JSON payload, with a copy button.
+function EventRow({ ev }) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const text = ev.payload ? JSON.stringify(ev.payload, null, 2) : '';
+  async function copy(e) {
+    e.stopPropagation();
+    const blob = JSON.stringify({ id: ev.id, type: ev.type, created_at: ev.created_at, payload: ev.payload }, null, 2);
+    try { await navigator.clipboard.writeText(blob); } catch { try { const ta = document.createElement('textarea'); ta.value = blob; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); } catch { /* ignore */ } }
+    setCopied(true); setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <>
+      <tr onClick={() => setOpen(!open)} style={{ cursor: 'pointer' }} aria-expanded={open} data-testid="event-row" data-type={ev.type} title={open ? 'Collapse' : 'Click for the full payload'}>
+        <td className="muted small" style={{ whiteSpace: 'nowrap' }}>{timeAgo(ev.created_at)}</td>
+        <td><span className="pill">{ev.type}</span></td>
+        <td className="small mono">{open ? '' : (ev.payload ? JSON.stringify(ev.payload).slice(0, 80) : '')}</td>
+      </tr>
+      {open && <tr data-testid="event-detail"><td colSpan={3}>
+        <div className="inline" style={{ justifyContent: 'space-between', marginBottom: 4 }}><span className="muted small">{ev.type} · {fmtDate(ev.created_at)} · #{ev.id}</span><button className="sm" onClick={copy} aria-label={`copy event ${ev.id}`}>{copied ? 'Copied' : 'Copy JSON'}</button></div>
+        <pre className="code small" style={{ maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{text || '(no payload)'}</pre>
+      </td></tr>}
+    </>
   );
 }

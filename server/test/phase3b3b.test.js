@@ -17,6 +17,13 @@ test('normalizeAuth reads the usual register/status shapes', () => {
   assert.deepEqual(normalizeAuth('ok'), { activated: true, status: 'ok' });
   assert.deepEqual(normalizeAuth({ error: 'timeout' }), { activated: null, status: null });
   assert.deepEqual(normalizeAuth(null), { activated: null, status: null });
+  // 43UM670H0UA (2026-09-18): auth boolean + auth_status words
+  assert.deepEqual(normalizeAuth({ id: 'netflix', auth: true, auth_status: 'authSuccess' }), { activated: true, status: 'authSuccess' });
+  assert.deepEqual(normalizeAuth({ id: 'netflix', auth: true }), { activated: true, status: 'auth=true' });
+  assert.deepEqual(normalizeAuth({ id: 'netflix', auth: false, auth_status: 'authFail' }), { activated: false, status: 'authFail' });
+  assert.deepEqual(normalizeAuth({ auth_status: 'authSuccess' }), { activated: true, status: 'authSuccess' });
+  assert.deepEqual(normalizeAuth({ auth_status: 'notRequired' }), { activated: true, status: 'notRequired' });
+  assert.deepEqual(normalizeAuth({ error: 'IDCAP_RESULT_FAILURE' }), { activated: null, status: null });
 });
 
 test('activation: status per set hides un-activated apps from that set only; admin sees badges; tokens register on the sets', async (t) => {
@@ -37,6 +44,7 @@ test('activation: status per set hides un-activated apps from that set only; adm
   for (const st of [a, b, c]) await s.call('PATCH', `/api/admin/sets/${st.json.set_id}`, { cookie, body: { group_id: g.id } });
   await s.call('PUT', `/api/admin/groups/${g.id}/apps`, { cookie, body: { app_ids: list.map((x) => x.id) } });
   const pollA = await s.call('GET', `/api/tv/poll?set_id=${a.json.set_id}&token=${a.json.token}`);
+  assert.equal(pollA.json.activation, null, 'no licences, no account number → nothing to ask');
   assert.deepEqual(pollA.json.apps.map((x) => x.id).sort(), ['amazon', 'youtube.leanback.v4'], 'A: Netflix hidden until activated');
   const pollB = await s.call('GET', `/api/tv/poll?set_id=${b.json.set_id}&token=${b.json.token}`);
   assert.equal(pollB.json.apps.length, 3, 'B: everything activated');
@@ -47,6 +55,8 @@ test('activation: status per set hides un-activated apps from that set only; adm
   assert.equal((await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: {} })).status, 400, 'nothing configured yet');
   const lic = await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu\n' }] } });
   assert.equal(lic.status, 200, lic.text); assert.equal(lic.json.added[0].app_id, 'netflix');
+  const pollA2 = await s.call('GET', `/api/tv/poll?set_id=${a.json.set_id}&token=${a.json.token}`);
+  assert.deepEqual((pollA2.json.activation || {}).status_ids, ['netflix'], 'the set asks register/status for the licensed ids only: ' + pollA2.status + ' ' + pollA2.text.slice(0, 200));
   const saved = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: '' } });
   assert.equal(saved.status, 200); assert.deepEqual(saved.json.config, { accountNumber: '', licensed: ['netflix'] });
   const cfg = (await s.call('GET', '/api/admin/apps/activation', { cookie })).json;
@@ -55,7 +65,7 @@ test('activation: status per set hides un-activated apps from that set only; adm
   assert.equal(run.status, 200); assert.equal(run.json.queued, 3);
   const cmdsA = (await s.call('GET', `/api/admin/sets/${a.json.set_id}`, { cookie })).json.commands;
   const reg = cmdsA.find((x) => x.type === 'register_apps');
-  assert.ok(reg, 'register_apps queued'); assert.deepEqual(reg.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }] });
+  assert.ok(reg, 'register_apps queued'); assert.deepEqual(reg.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }], status_ids: ['netflix'] });
   assert.equal((await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: {} })).json.queued, 3);
   assert.equal((await s.call('GET', `/api/admin/sets/${a.json.set_id}`, { cookie })).json.commands.filter((x) => x.type === 'register_apps' && x.status === 'queued').length, 1, 'deduped while queued');
   // over WS: A reports the registration result and fresh status → Netflix appears in A's apps push
@@ -105,13 +115,14 @@ test('activation: status per set hides un-activated apps from that set only; adm
   // an account number on top of the tokens; without any licence the payload is the account number alone
   const acc = await s.call('PUT', '/api/admin/apps/activation', { cookie, body: { accountNumber: 'ACC-9' } });
   assert.equal(acc.json.config.accountNumber, 'ACC-9');
+  assert.deepEqual((await s.call('GET', `/api/tv/poll?set_id=${a2.json.set_id}&token=${a2.json.token}`)).json.activation.status_ids.sort(), ['amazon', 'netflix'], 'account number: the controlled apps are asked too (a2: A re-registered and got a new token)');
   const run2 = await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: { set_ids: [b.json.set_id] } });
   assert.equal(run2.json.queued, 1);
   const cmdB = (await s.call('GET', `/api/admin/sets/${b.json.set_id}`, { cookie })).json.commands.find((x) => x.type === 'register_apps');
-  assert.deepEqual(cmdB.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }], accountNumber: 'ACC-9' });
+  assert.deepEqual(cmdB.payload, { tokenList: [{ id: 'netflix', token: 'TkZYLTEyMy1uZXRmbGl4LXRva2Vu' }], accountNumber: 'ACC-9', status_ids: ['netflix', 'amazon'] });
   await s.call('DELETE', `/api/admin/licences/${lic.json.added[0].id}`, { cookie });
   const run3 = await s.call('POST', '/api/admin/apps/activation/run', { cookie, body: { set_ids: [c.json.set_id] } });
   assert.equal(run3.json.queued, 1);
-  assert.deepEqual((await s.call('GET', `/api/admin/sets/${c.json.set_id}`, { cookie })).json.commands.find((x) => x.type === 'register_apps').payload, { accountNumber: 'ACC-9' });
+  assert.deepEqual((await s.call('GET', `/api/admin/sets/${c.json.set_id}`, { cookie })).json.commands.find((x) => x.type === 'register_apps').payload, { accountNumber: 'ACC-9', status_ids: ['netflix', 'amazon'] });
   ws.close();
 });

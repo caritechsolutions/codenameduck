@@ -66,3 +66,22 @@ Determine NORMAL vs WARM with `idcap://power/powermode/get`.
 
 ## application/list fields (as returned)
 `title`, `appId`, `iconPath`, `version`, `installed`, `type`.
+
+## register/status — replies observed on the 43UM670H0UA (2026-09-18, not in LG's document)
+
+`idcap://application/register/status { id }` answers for a controlled app even while it is
+**absent from `application/list`** (they only appear once registered), so status must be asked
+by app id, never derived from the list. Observed shapes:
+
+| Reply | Meaning |
+|---|---|
+| `{ auth: true, auth_status: "authSuccess" }` | token registered, app activated |
+| `{ auth: false, ... }` | not activated → register the token |
+| `{ auth_status: "notRequired" }` | the app needs no token (YouTube, browser, …) |
+| onFailure `IDCAP_RESULT_FAILURE` | the id is unknown to the set (e.g. `airplay`) |
+
+CoopCentric treats only `auth === true` as authorised; any other value, a failed query or no
+reply for a licensed id means the token is registered (one `application/register` per token,
+waiting for its `application_registration_result_received`, whose `tokenResult` is the string
+`"success"` or `"fail"`). **Re-registering an already authorised app resets its sign-in** on
+the set — the reason registration is driven by this status and nothing else.

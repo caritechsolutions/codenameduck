@@ -509,3 +509,24 @@ Decisions already made (do not re-open):
   "failed on <model>". `hasRegistered()` is no longer used for queuing.
 - Renderer ignores a failed `channel_changed` while no tuner channel is selected (LG fires one
   at boot when the start channel is disabled): `channel_event {ignored:true}` instead of `tv_error`.
+
+### Part B3e — register/status by licensed id, sequential tokens (2026-09-18)
+
+- Root cause of B3d's `status: null`: `register/status` was only asked for apps in
+  `application/list`, and LG's controlled apps are absent from the list until registered.
+- Server `registerPayload()` adds `status_ids` = every licence on file (failed ones too) plus
+  `netflix`/`amazon` when an account number is set. `normalizeAuth()` reads `auth` (boolean) first
+  and knows `authSuccess` / `notRequired` (activated) and `authFail` (not).
+- Renderer boot (`bootRegisterApps`, once per boot, `state.bootPromise`): `readAppStatus(ids)` by
+  licensed id only (a failed query is kept as `{error}`) → `apps_status` event → `registerAndRefresh`
+  (plan: register every licensed token whose status is not exactly `auth === true`; `registerOne`
+  per token, waiting for its own `application_registration_result_received`, 20 s each) → re-read
+  list + status → `apps_list` / `apps_status`. `state.appsHold` keeps the apps zone empty until
+  then (`pendingApps` applied after); a `register_apps` command waits for `bootPromise` and re-reads
+  status first, acking `{ok:true, skipped}` when everything is authorised. `readAppList()` no longer
+  chains a status read; `tv.off()` added to the platform adapter.
+- `statusActivated(raw)` is strict: true only for `raw.auth === true`; null = not asked.
+- Fake middleware answers `register/status` in LG's shape (`auth`, `auth_status`), for controlled
+  apps even while hidden from the list, and fails for unknown ids.
+- Admin set drawer: event rows expand to the full pretty JSON with a Copy button (`EventRow`).
+- `docs/lg/netflix.md` records the observed status replies.

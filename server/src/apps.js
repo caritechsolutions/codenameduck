@@ -29,13 +29,17 @@ function normalizeAppList(raw) {
 
 // LG's register/status reply shape is not in our doc extracts: read the usual field names and
 // map them to activated true/false/null (+ the raw status string for the admin).
-const YES = /^(registered|activated|authorized|authorised|ok|success|true|yes|valid|done|1)$/i;
-const NO = /^(unregistered|not[_ ]?registered|unactivated|unauthorized|unauthorised|fail(ed|ure)?|false|no|invalid|none|error|0)$/i;
+// LG 43UM670H0UA register/status replies (2026-09-18): { auth: true|false, auth_status: "authSuccess" |
+// "notRequired" | ... }. `auth` is read first (it is the first key below); the words cover replies
+// without it and older shapes.
+const YES = /^(registered|activated|authorized|authorised|authsuccess|notrequired|ok|success|true|yes|valid|done|1)$/i;
+const NO = /^(unregistered|not[_ ]?registered|unactivated|unauthorized|unauthorised|authfail(ed|ure)?|fail(ed|ure)?|false|no|invalid|none|error|0)$/i;
 function normalizeAuth(raw) {
   if (raw == null) return { activated: null, status: null };
   if (typeof raw === 'boolean') return { activated: raw, status: String(raw) };
   if (typeof raw === 'string' || typeof raw === 'number') { const v = String(raw); return { activated: YES.test(v) ? true : NO.test(v) ? false : null, status: v.slice(0, 80) }; }
   if (typeof raw !== 'object') return { activated: null, status: null };
+  if (typeof raw.auth === 'boolean') return { activated: raw.auth, status: typeof raw.auth_status === 'string' && raw.auth_status ? raw.auth_status.slice(0, 80) : `auth=${raw.auth}` };
   for (const k of ['auth', 'auth_status', 'authStatus', 'status', 'registered', 'activated', 'activation', 'result', 'state', 'value']) {
     if (raw[k] === undefined || raw[k] === null) continue;
     const v = raw[k];
@@ -210,6 +214,12 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
     if (toks.length) p.tokenList = toks;
     const cfg = activationConfig(tenant);
     if (cfg.accountNumber) p.accountNumber = cfg.accountNumber;
+    // The ids the set must ask register/status for: every licence on file (failed ones too, so
+    // the admin still sees their state) and, with an account number, the controlled apps LG
+    // activates that way. Never the 100+ other apps.
+    const ids = new Set((licences ? licences.list() : []).map((l) => l.app_id));
+    if (cfg.accountNumber) for (const id of ['netflix', 'amazon']) ids.add(id);
+    if (ids.size) p.status_ids = [...ids];
     return Object.keys(p).length ? p : null;
   }
   return { record, list, get, updateOverrides, remove, setGroupApps, enabledFor, normalizeAppList, normalizeAuth,

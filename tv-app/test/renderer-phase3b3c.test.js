@@ -65,7 +65,7 @@ test('licence tokens: registered at boot only for apps whose register/status is 
   const reason = detail.events.find((e) => e.type === 'tv_apps_registration_reason' && e.payload.trigger !== 'server_register');
   assert.ok(reason, 'renderer reason event');
   assert.deepEqual(reason.payload.sending, ['netflix']);
-  assert.equal(reason.payload.apps[0].in_list, true); assert.equal(reason.payload.apps[0].status.status, 'unregistered'); assert.equal(reason.payload.apps[0].activated, false);
+  assert.equal(reason.payload.apps[0].in_list, true); assert.equal(reason.payload.apps[0].status.auth, false); assert.equal(reason.payload.apps[0].activated, false);
   const regEv = detail.events.find((e) => e.type === 'tv_apps_registration');
   assert.equal(regEv.payload.ok, true); assert.deepEqual(regEv.payload.results.map((r) => [r.id, r.tokenResult]), [['netflix', 'success']]);
   assert.ok(!types.includes('tv_error'), 'no error for service country NL: ' + JSON.stringify(detail.events.filter((e) => e.type === 'tv_error')));
@@ -80,7 +80,7 @@ test('licence tokens: registered at boot only for apps whose register/status is 
   f = await p2.fake();
   assert.equal((f.registered || []).length, 0, 'authorised: no application/register on the second boot');
   detail = (await s.stack.api('GET', `/api/admin/sets/${set.id}`, undefined, s.cookie)).json;
-  assert.equal(detail.commands.filter((c) => c.type === 'register_apps').length, 1, 'no new register_apps command');
+  assert.equal(detail.commands.filter((c) => c.type === 'register_apps').length, 0, 'the server never needed to queue a command: the set registers on its own at boot');
   await p2.page.close();
 
   // a brand-new set that is already authorised: no registration at all, no command

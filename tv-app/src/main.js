@@ -30,7 +30,7 @@ var state = {
   osd: null, scale: 1, offset: { x: 0, y: 0 }, digits: '', digitTimer: null, focus: { zone: null, index: 0 },
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
-  apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, serviceCountry: null
+  apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, bootPromise: null, appsHold: false, pendingApps: null, serviceCountry: null
 };
 
 // ---------------------------------------------------------------- logging
@@ -591,6 +591,9 @@ function applyLineup(lineup) {
   }
 }
 function applyApps(apps) {
+  // While the boot activation sequence runs (status → register → re-read) the apps zone stays
+  // empty: nothing to launch before the set knows what is authorised.
+  if (state.appsHold) { state.pendingApps = apps || []; return; }
   var next = apps || [];
   if (JSON.stringify(next) === JSON.stringify(state.apps)) return;
   state.apps = next;
@@ -614,9 +617,9 @@ function applyState(data) {
   if (data.messages) applyMessages(data.messages);
   if (data.apps) applyApps(data.apps);
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
+  if (data.activation !== undefined) { state.activation = data.activation || null; bootRegisterApps(); }   // before commands: register_apps waits for it
   if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
   if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
-  if (data.activation !== undefined) { state.activation = data.activation || null; bootRegisterApps(); }
 }
 
 // ---------------------------------------------------------------- commands
@@ -686,7 +689,7 @@ function runCommand(cmd, ack) {
         });
         break;
       case 'launch_app': r = launchApp(p.app_id, p.params, p.noSplash, 'launcher').then(function (sent) { return { app_id: p.app_id, params: sent }; }); break;
-      case 'register_apps': r = registerAndRefresh(p, 'command').then(function (res) { if (res.ok === false) throw new Error('registration failed: ' + JSON.stringify(res.results || res.result)); return res; }); break;
+      case 'register_apps': r = (state.bootPromise || Promise.resolve()).then(function () { return registerAndRefresh(p, 'command'); }).then(function (res) { if (res.ok === false) throw new Error('registration failed: ' + JSON.stringify(res.results || res.result)); return res; }); break;
       default: r = Promise.reject(new Error('unsupported command ' + cmd.type));
     }
   } catch (e) { r = Promise.reject(e); }
@@ -864,7 +867,7 @@ function readAppList() {
     state.appsReported = r || null;
     var n = Array.isArray(r) ? r.length : (r && (r.list || r.applications || r.apps || r.appList) ? (r.list || r.applications || r.apps || r.appList).length : '?');
     log('application/list: ' + n + ' entries');
-  }, function (e) { log('application/list failed: ' + e.message); state.appsReported = null; }).then(readAppStatus);
+  }, function (e) { log('application/list failed: ' + e.message); state.appsReported = null; });
 }
 // App ids out of whatever shape application/list returned.
 function reportedAppIds() {
@@ -874,45 +877,57 @@ function reportedAppIds() {
   arr.forEach(function (a) { var id = typeof a === 'string' ? a : a && (a.id || a.appId || a.app_id); if (id && ids.indexOf(id) < 0) ids.push(id); });
   return ids.slice(0, 100);
 }
-// application/register/status per discovered app → state.appsStatus {id: raw}. Sequential, best effort.
-function readAppStatus() {
-  var ids = reportedAppIds();
-  if (!ids.length || state.api !== 'idcap') { state.appsStatus = null; return Promise.resolve(null); }
+// The app ids whose activation matters: the licences on file (server: activation.status_ids),
+// never the 100+ other apps in application/list.
+function licensedIds() {
+  var a = state.activation || {};
+  var ids = Array.isArray(a.status_ids) ? a.status_ids.slice() : [];
+  (Array.isArray(a.tokenList) ? a.tokenList : []).forEach(function (t) { if (t && t.id && ids.indexOf(t.id) < 0) ids.push(t.id); });
+  return ids.slice(0, 20);
+}
+// application/register/status per licensed app id → state.appsStatus {id: raw}. Asked by id,
+// whether or not the app is in application/list (LG's controlled apps are absent until they are
+// registered). A failed query is kept as {error} — for a licensed id that means "not authorised".
+function readAppStatus(ids) {
+  ids = ids || licensedIds();
+  if (!ids.length || state.api !== 'idcap') { state.appsStatus = ids.length ? state.appsStatus : null; return Promise.resolve(null); }
   var out = {};
   var p = Promise.resolve();
-  ids.forEach(function (id) { p = p.then(function () { return tv.appRegisterStatus(id).then(function (r) { if (r != null) out[id] = r; }, function (e) { out[id] = { error: e.message }; }); }); });
-  return p.then(function () { state.appsStatus = out; log('application/register/status: ' + Object.keys(out).length + ' apps'); return out; });
+  ids.forEach(function (id) { p = p.then(function () { return tv.appRegisterStatus(id).then(function (r) { out[id] = r == null ? { error: 'empty reply' } : r; }, function (e) { out[id] = { error: e.message }; }); }); });
+  return p.then(function () { state.appsStatus = out; log('application/register/status: ' + ids.map(function (id) { return id + '=' + (statusActivated(out[id]) === true ? 'auth' : 'NOT'); }).join(' ')); return out; });
 }
 // After a registration: re-read the status and tell the server (it hides un-activated apps).
 function refreshAppStatus() {
   return readAppStatus().then(function (st) { if (st) sendEvent('apps_status', { status: st }); return st; });
 }
-// register_apps command: application/register + wait for application_registration_result_received.
-function registerApps(payload) {
+// application/register, one token at a time: each call waits for its own
+// application_registration_result_received ({ id, tokenResult: "success" | "fail", errorMessage })
+// before the next token goes out. An account number is one call with one result.
+function registerOne(params, expectId) {
   return new Promise(function (resolve, reject) {
-    var expected = (payload && Array.isArray(payload.tokenList) ? payload.tokenList : []).map(function (t) { return t && t.id; }).filter(Boolean);
-    var results = [], first = null, done = false, grace = null;
-    var finish = function (timedOut) {
-      if (done) return; done = true; clearTimeout(t); if (grace) clearTimeout(grace);
-      var oks = results.map(function (r) { return r.ok; });
-      var ok = !results.length ? null : oks.some(function (o) { return o === false; }) ? false : oks.every(function (o) { return o === true; }) ? true : null;
-      if (timedOut && !results.length) return resolve({ ok: null, result: { timeout: true }, results: [] });
-      resolve({ ok: ok, result: first, results: results.map(function (r) { return { id: r.id, tokenResult: r.tokenResult, errorMessage: r.errorMessage, ok: r.ok }; }), timeout: !!timedOut });
-    };
-    var t = setTimeout(function () { finish(true); }, 20000);
-    // LG fires one application_registration_result_received per token: { id, tokenResult:
-    // "success" | "fail", errorMessage }. Older/other shapes (booleans, result/status) are read too.
+    var done = false;
+    var finish = function (r) { if (done) return; done = true; clearTimeout(t); tv.off('application_registration_result_received', onResult); resolve(r); };
+    var t = setTimeout(function () { finish({ id: expectId, tokenResult: null, errorMessage: 'no application_registration_result_received within 20 s', ok: null, timeout: true }); }, 20000);
     var onResult = function (ev) {
       if (done) return;
+      if (expectId && ev && ev.id && ev.id !== expectId && ev.id !== 'account') return;   // another token's late event
       var r = {}; ['tokenResult', 'result', 'status', 'errorMessage', 'id', 'accountNumber', 'detail'].forEach(function (k) { if (ev && ev[k] !== undefined) r[k] = ev[k]; });
-      if (!first) first = r;
-      results.push({ id: r.id, tokenResult: r.tokenResult, errorMessage: r.errorMessage, ok: tokenOk(ev) });
-      var got = results.map(function (x) { return x.id; });
-      if (expected.length && expected.every(function (id) { return got.indexOf(id) >= 0; })) finish(false);
-      else if (!grace) grace = setTimeout(function () { finish(false); }, 3000);   // wait a moment for the other tokens' events
+      finish({ id: r.id || expectId, tokenResult: r.tokenResult !== undefined ? r.tokenResult : (r.result !== undefined ? r.result : r.status), errorMessage: r.errorMessage, ok: tokenOk(ev), raw: r });
     };
     tv.on('application_registration_result_received', onResult);
-    tv.registerApps(payload).then(null, function (e) { if (!done) { done = true; clearTimeout(t); if (grace) clearTimeout(grace); reject(e); } });
+    tv.registerApps(params).then(null, function (e) { if (!done) { done = true; clearTimeout(t); tv.off('application_registration_result_received', onResult); reject(e); } });
+  });
+}
+function registerApps(payload) {
+  var tokens = payload && Array.isArray(payload.tokenList) ? payload.tokenList : [];
+  var results = [];
+  var seq = Promise.resolve();
+  tokens.forEach(function (t) { seq = seq.then(function () { return registerOne({ tokenList: [t] }, t.id).then(function (r) { results.push(r); log('application/register ' + t.id + ': ' + (r.tokenResult == null ? 'no result' : r.tokenResult)); }); }); });
+  if (!tokens.length && payload && payload.accountNumber) seq = seq.then(function () { return registerOne({ accountNumber: payload.accountNumber }, 'account').then(function (r) { results.push(r); }); });
+  return seq.then(function () {
+    var oks = results.map(function (r) { return r.ok; });
+    var ok = !results.length ? null : oks.some(function (o) { return o === false; }) ? false : oks.every(function (o) { return o === true; }) ? true : null;
+    return { ok: ok, result: results.length ? results[0].raw || null : { timeout: true }, results: results.map(function (r) { return { id: r.id, tokenResult: r.tokenResult, errorMessage: r.errorMessage, ok: r.ok }; }), timeout: results.some(function (r) { return r.timeout; }) };
   });
 }
 function tokenOk(ev) {
@@ -923,16 +938,17 @@ function tokenOk(ev) {
   if (typeof v === 'string') { if (/^(success|ok|registered|true)$/i.test(v)) return true; if (/^(fail|failure|failed|error|false)/i.test(v)) return false; }
   return ev.errorMessage ? false : null;
 }
-// Which licensed apps may be registered right now: only those whose register/status says not
-// authorised. Never because an id is absent from application/list, never an authorised app
-// (LG resets its sign-in). Sends the apps_registration_reason event with the evidence.
+// Which licensed apps may be registered right now: only those whose register/status does NOT
+// say authorised (auth === true). A failed or missing status for a licensed id counts as not
+// authorised. Never an authorised app (LG resets its sign-in). Sends apps_registration_reason
+// with the evidence.
 function registrationPlan(payload, trigger) {
   var tokens = payload && Array.isArray(payload.tokenList) ? payload.tokenList : [];
   var ids = reportedAppIds(), st = state.appsStatus || {};
   var apps = tokens.map(function (t) { var id = t && t.id; return { id: id, in_list: ids.indexOf(id) >= 0, status: st[id] === undefined ? null : st[id], activated: statusActivated(st[id]) }; });
-  var send = tokens.filter(function (t, i) { return apps[i].activated === false; });
+  var send = tokens.filter(function (t, i) { return apps[i].activated !== true; });
   var out = { trigger: trigger, apps: apps, sending: send.map(function (t) { return t.id; }), account: !!(payload && payload.accountNumber) };
-  if (!send.length && !(payload && payload.accountNumber)) out.skipped = tokens.length ? 'no licensed app reports not authorised' : 'nothing to register';
+  if (!send.length && !(payload && payload.accountNumber)) out.skipped = tokens.length ? 'every licensed app reports auth: true' : 'nothing to register';
   sendEvent('apps_registration_reason', out);
   log('app registration (' + trigger + '): ' + (out.skipped ? 'skipped — ' + out.skipped : 'sending ' + (out.sending.join(',') || 'account number')));
   var p = {};
@@ -940,54 +956,60 @@ function registrationPlan(payload, trigger) {
   if (payload && payload.accountNumber && !tokens.length) p.accountNumber = payload.accountNumber;   // account-number-only registration stays explicit
   return { plan: out, payload: Object.keys(p).length ? p : null };
 }
-// Registration + status refresh shared by the register_apps command and the boot path.
-function registerAndRefresh(payload, trigger) {
+// Status → plan → register (sequential) → re-read list + status → events. Shared by the boot
+// path and the register_apps command. statusFresh skips the first status read.
+function registerAndRefresh(payload, trigger, statusFresh) {
   if (state.registering) return Promise.reject(new Error('registration already in progress'));
-  var r = registrationPlan(payload, trigger || 'command');
-  if (!r.payload) return Promise.resolve({ ok: true, skipped: r.plan.skipped, results: [] });
   state.registering = true;
   var done = function () { state.registering = false; };
-  return registerApps(r.payload).then(function (res) {
-    sendEvent('apps_registration', { ok: res.ok, result: res.result, results: res.results, sent: r.plan.sending, trigger: trigger || 'command' });
-    // controlled apps only appear in application/list once registered → re-read the list too
-    return readAppList().then(function () {
-      if (state.appsReported) sendEvent('apps_list', { apps: state.appsReported });
-      if (state.appsStatus) sendEvent('apps_status', { status: state.appsStatus });
-      done(); return res;
+  var ids = licensedIds();
+  (payload && Array.isArray(payload.tokenList) ? payload.tokenList : []).forEach(function (t) { if (t && t.id && ids.indexOf(t.id) < 0) ids.push(t.id); });
+  var pre = statusFresh ? Promise.resolve() : readAppStatus(ids).then(function (st) { if (st) sendEvent('apps_status', { status: st }); });
+  return pre.then(function () {
+    var r = registrationPlan(payload, trigger || 'command');
+    if (!r.payload) { done(); return { ok: true, skipped: r.plan.skipped, results: [] }; }
+    return registerApps(r.payload).then(function (res) {
+      sendEvent('apps_registration', { ok: res.ok, result: res.result, results: res.results, sent: r.plan.sending, trigger: trigger || 'command' });
+      // controlled apps only appear in application/list once registered → re-read list + status
+      return readAppList().then(function () { return readAppStatus(ids); }).then(function () {
+        if (state.appsReported) sendEvent('apps_list', { apps: state.appsReported });
+        if (state.appsStatus) sendEvent('apps_status', { status: state.appsStatus });
+        done(); return res;
+      });
     });
-  }, function (e) { done(); throw e; });
+  }).then(null, function (e) { done(); throw e; });
 }
-// Does the raw register/status reply say "not authorised"? Mirrors the server's normalizeAuth.
+// Authorised means exactly auth === true in LG's register/status reply (43UM670H0UA:
+// { auth: true|false, auth_status: "authSuccess" | "notRequired" | ... }). Anything else — a
+// different value, a failed query ({error}), an empty reply — is not authorised. null = not asked.
 function statusActivated(raw) {
-  if (raw == null) return null;
-  if (typeof raw === 'boolean') return raw;
-  var v = null;
-  if (typeof raw === 'string' || typeof raw === 'number') v = String(raw);
-  else if (typeof raw === 'object') {
-    var keys = ['auth', 'auth_status', 'authStatus', 'status', 'registered', 'activated', 'activation', 'result', 'state', 'value'];
-    for (var i = 0; i < keys.length; i++) { if (raw[keys[i]] !== undefined && raw[keys[i]] !== null) { v = raw[keys[i]]; break; } }
-    if (typeof v === 'boolean') return v;
-    if (v == null) return null; v = String(v);
-  }
-  if (/^(unregist|not|un|fail|deni|invalid|error|no$)/i.test(v)) return false;
-  if (/^(regist|authori|ok|success|valid|activ|true|yes|1$)/i.test(v)) return true;
-  return null;
+  if (raw === undefined || raw === null) return null;
+  if (raw === true) return true;
+  if (raw && typeof raw === 'object' && raw.auth === true) return true;
+  return false;
 }
-// Boot activation (docs/lg/netflix.md): the state payload carries the licence tokens on file
-// (+ the tenant's account number). Once per boot, register the tokens of the apps whose
-// register/status reports not authorised — and only those. The register_apps command is the
-// same path.
+// Boot activation, once per boot, in this order: register/status for every licensed id →
+// register the tokens of those not authorised (one at a time) → re-read list + status → events.
+// The apps zone is held empty until it is done. The register_apps command waits for it too.
 function bootRegisterApps() {
   var a = state.activation;
-  if (!a || state.bootRegistered || state.registering || state.api !== 'idcap') return;
-  var tokens = Array.isArray(a.tokenList) ? a.tokenList : [];
-  if (!tokens.length) return;   // account-number registration is admin-triggered only
-  var st = state.appsStatus || {};
-  var need = tokens.filter(function (t) { return t && t.id && statusActivated(st[t.id]) === false; }).map(function (t) { return t.id; });
-  if (!need.length) { state.bootRegistered = true; return; }
+  if (!a || state.bootRegistered || state.api !== 'idcap') return;
   state.bootRegistered = true;
-  registerAndRefresh({ tokenList: tokens }, 'boot').then(function (res) { log('boot registration ' + (res.ok === false ? 'FAILED' : 'done')); if (res.ok === false) reportError('app_registration', 'licence registration failed: ' + JSON.stringify(res.results || res.result), { apps: need }); },
-    function (e) { reportError('app_registration', 'licence registration: ' + e.message, { apps: need }); });
+  var ids = licensedIds();
+  var tokens = Array.isArray(a.tokenList) ? a.tokenList : [];
+  if (!ids.length) return;
+  state.appsHold = true;
+  var release = function () { state.appsHold = false; state.bootPromise = null; if (state.pendingApps) { var pa = state.pendingApps; state.pendingApps = null; applyApps(pa); } };
+  state.bootPromise = readAppStatus(ids).then(function (st) {
+    if (st) sendEvent('apps_status', { status: st });
+    if (!tokens.length) return null;   // account-number registration is admin-triggered only
+    return registerAndRefresh({ tokenList: tokens }, 'boot', true).then(function (res) {
+      if (res.skipped) return res;
+      log('boot registration ' + (res.ok === false ? 'FAILED' : 'done'));
+      if (res.ok === false) reportError('app_registration', 'licence registration failed: ' + JSON.stringify(res.results || res.result), { apps: (res.results || []).filter(function (r) { return r.ok === false; }).map(function (r) { return r.id; }) });
+      return res;
+    });
+  }).then(function (res) { release(); return res; }, function (e) { release(); reportError('app_registration', 'licence registration: ' + e.message); });
 }
 // Launch an app with LG's parameters. Netflix (docs/lg/netflix.md) needs the tenant's hotel id and
 // a reason: 'launcher' (tile/menu/command), 'hotKey' (remote key while ON), 'boot' with

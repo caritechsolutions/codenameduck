@@ -561,3 +561,33 @@ the payload and appear in the journal, and a failure is retried after 1 h (doubl
     second boot on, localStorage survives and the cache path works in deploy mode. If the port
     changes, `cache_version` is null on every boot and only the bundle's `state.json` serves an
     offline boot — **send me the three origins.**
+
+### Part D4b — registration vs connectivity, TV's own banner
+
+16. **Register with the network pulled.** Set with Netflix `authNeeded`, unplug the set's network
+    (or block internet at the router), power-cycle. When the set is back online: `tv_boot.internet`
+    is `false`, the boot's `tv_apps_registration_reason` has `skipped: "no internet connection …"`
+    and `postponed: ["netflix"]`, there is **no** `tv_apps_registration` from that boot and App
+    licences shows **no** failed pill. If the internet dropped *during* the register call instead,
+    the `tv_apps_registration` carries `internet: false`, `offline: true`, `ok: null` and the
+    journal says `"fail" … while the set had no internet — not counted`.
+17. **Network back → registration without a reboot.** Plug the network back in. Within a few
+    seconds: `tv_network {internet: true, was: false}`, then `tv_apps_registration_reason` with
+    `trigger: "network_restored"` and `sending: ["netflix"]`, `tv_apps_registration` with
+    `tokenResult: "success"`, Netflix in the apps zone. If `tv_network` never appears, LG's event
+    is not `idcap::network_event_received` / `network_changed` on this set — tell me, and whether
+    a second `tv_network` comes from the periodic heartbeat.
+18. **Banner at boot (default setting).** Group (or no group) with "Hide TV's own OSD" = banner
+    (=1). Power-cycle. The `tv_osd` event (or `tv_boot.tv_osd` on a cache/bundle boot) shows
+    `banner_select: {before: <old>, sent: {item: 107, value: 1}, after: 1}` — **tell me `before`
+    and whether LG's channel banner still appears over the portal.** An `error` in
+    `banner_select` means the IDCAP parameter names are wrong (both `{item: 107}` and
+    `{item: "BANNER_SELECT"}` were tried) — send me the text.
+19. **Flip the value.** If the banner still shows, set the group's value to =0, power-cycle and
+    look again (`after: 0`). Record which value hides the banner; if neither does, go to 20.
+20. **osd_lock.** Group mode "banner + osd_lock". Power-cycle: `tv_osd.osd_lock.value` is `"1"`
+    and no LG OSD appears over the portal (banner, volume bar? — note what is still drawn).
+    Launch Netflix from a tile: the drawer shows `tv_osd {osd_lock: {value: "0", why: "launch
+    netflix"}}` before the app opens, and `{value: "1", why: "resumed"}` when you come back. Exit
+    the portal (Installation Menu / power off): `why: "on_destroy"` or nothing — tell me which.
+    Check that volume keys still work in this mode.

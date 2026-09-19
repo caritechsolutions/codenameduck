@@ -39,7 +39,7 @@ export default function Groups() {
       <div className="card" style={{ padding: 0 }}>
         {groups.data && groups.data.length === 0 ? <Empty>No groups yet. Create one, e.g. "Standard rooms".</Empty> : (
           <table>
-            <thead><tr><th>Name</th><th>Description</th><th className="num">Sets</th><th>Layout</th><th>Vacant layout</th><th>Welcome popup</th><th>Instant On</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Description</th><th className="num">Sets</th><th>Layout</th><th>Vacant layout</th><th>Welcome popup</th><th>Instant On</th><th>Hide TV's own OSD</th><th></th></tr></thead>
             <tbody>{(groups.data || []).map((g) => (
               <tr key={g.id}>
                 <td><b>{g.name}</b></td>
@@ -58,6 +58,16 @@ export default function Groups() {
                   <option value="10">Always On (10)</option>
                   <option value="0">Off (0)</option>
                 </select></td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <select value={g.hide_tv_osd || 'banner'} onChange={(e) => option(g, { hide_tv_osd: e.target.value }, e.target.value === 'off' ? 'TV OSD left alone' : e.target.value === 'osd_lock' ? 'Banner setting + osd_lock while the portal is in front · applied at the next boot / layout push' : 'Installer Menu 107 BANNER_SELECT written at boot · applied at the next boot / layout push')} aria-label={`hide tv osd ${g.name}`} title="LG's own channel-change banner appears over the portal at boot. banner = Installer Menu item 107 BANNER_SELECT; osd_lock = banner + property osd_lock=1 while the portal is in front (released for apps)">
+                    <option value="off">off</option>
+                    <option value="banner">banner (107)</option>
+                    <option value="osd_lock">banner + osd_lock</option>
+                  </select>
+                  {(g.hide_tv_osd || 'banner') !== 'off' && <select value={String(g.banner_select == null ? 1 : g.banner_select)} onChange={(e) => option(g, { banner_select: Number(e.target.value) }, `BANNER_SELECT=${e.target.value} at the next boot`)} aria-label={`banner select ${g.name}`} title="Value written to Installer Menu item 107 (LG: “selects the type of banner displayed during channel change (0/1)”) — flip it if the banner is still there" style={{ marginLeft: 4 }}>
+                    <option value="1">=1</option><option value="0">=0</option>
+                  </select>}
+                </td>
                 <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><button className="sm" onClick={() => setEditing(g)}>Edit</button> <button className="sm danger" onClick={() => setRemoving(g)}>Delete</button></td>
               </tr>))}</tbody>
           </table>)}

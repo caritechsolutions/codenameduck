@@ -624,3 +624,45 @@ Decisions already made (do not re-open):
   unzipped app from a loopback HTTP server on the set. Whether the port is stable across boots
   decides whether `localStorage.cc_state` survives (TV plan D4 step 15); the server-side test uses
   that origin verbatim.
+
+### Part D4b — network-aware registration, TV's own OSD (2026-09-19)
+
+- Hardware (network-pull test): a `"fail"` from `application/register` while the set had no
+  internet was counted as a licence failure, and LG's own channel-change banner (the last RF
+  channel, not in our lineup) appears over the portal at boot.
+- Connectivity: `platform.getNetwork()` = `network/configuration/get` →
+  `isInternetConnectionAvailable` (`state.internet`, read after platform prep and before every
+  registration). No internet → nothing is sent to LG; `apps_registration_reason` says
+  `skipped: "no internet connection …", postponed: [ids], internet: false`. A `"fail"`/timeout
+  followed by `internet === false` is reported with `offline: true` per result and
+  `internet: false` on the `apps_registration` event, `ok: null`, no `tv_error`; the server
+  (`apps.recordRegistration`) never marks such a licence failed ("not counted" journal line), so
+  the backoff only applies to failures with internet. `idcap::network_event_received` (and
+  `network_changed`) → `onNetworkEvent()`: re-reads the network, sends `tv_network {internet,
+  was}`, and on a false→true transition with a licensed app still not authorised (or a postponed
+  registration) runs status → register → re-read at once with `trigger: "network_restored"`.
+- TV OSD: migration 017 `groups.hide_tv_osd off|banner|osd_lock` (default `banner`) and
+  `groups.banner_select 0|1` (default 1). `state.build()` → `tv_osd {mode, banner_select}` (sets
+  without a group get the default; `tvOsdOf()` in `state.js`), in the WS `layout` push (part of
+  the layout key), in the bundle (`groups[].tv_osd`, `tv_osd_default`) and the cache. Renderer
+  `applyTvOsd()`: `banner` → read Installer Menu item **107 BANNER_SELECT**
+  (`platform.getInstallerMenuItem`, hcap.js item numbers; IDCAP
+  `configuration/installermenuitem/get|set` tried with `{item: 107}` then `{item: "BANNER_SELECT"}`
+  — parameter names unverified), write `banner_select` if it differs, read back; `osd_lock` →
+  additionally `setPropertyVerified('osd_lock', "1")` at boot, `"0"` before every app launch, on
+  `idcap::on_destroy` and `pagehide`/`unload`, back to `"1"` when the page is visible again.
+  Result `{mode, banner_select: {before, sent, after | unchanged | error}, osd_lock: {value, why}}`
+  goes out as a `tv_osd` event on every application and, for a cache/bundle boot, inside `tv_boot`
+  (the boot event waits ≤4 s for it; a server-only boot has `tv_osd: null` there and the `tv_osd`
+  event right after). **What 0/1 means for item 107 is not in our extracts** (LG: "selects the type
+  of banner displayed during channel change (0/1)"); the value is a group setting so it can be
+  flipped on the TV without a rebuild, and `osd_lock` is the escalation if neither value removes
+  the banner. Admin Groups: "Hide TV's own OSD" column (mode + value).
+- WS catch-up: the renderer appends `sv=<state_version it holds>` to the `/ws/tv` URL; the hub
+  compares it with the tenant's current version at connect and, when the set is behind, pushes the
+  current state right after `hello` (`refresh(..., {bump:false})`) instead of seeding `sent.*` with
+  it. A change landing between a register answer and the WS connect was otherwise lost until the
+  next poll (surfaced by the D2 renderer test once the boot got a few ms longer). `tv_boot` fields
+  are captured before the OSD wait, so a fast server answer cannot relabel a cache/bundle boot.
+- `tv-app/package.json` `npm test` now lists every renderer test file (b3c, b3d, 3c, 3d, 3d4 had
+  been left out of the script).

@@ -175,5 +175,12 @@ describe('Part C rooms & reservations', () => {
     await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PATCH' && p === '/groups/1' && b.vacant_layout_id === '6')).toBe(true));
     fireEvent.change(screen.getByLabelText('welcome popup Std'), { target: { value: '10' } });
     await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PATCH' && p === '/groups/1' && b.welcome_popup_s === 10)).toBe(true));
+    // D4b: Hide TV's own OSD (mode + BANNER_SELECT value)
+    const osd = screen.getByLabelText('hide tv osd Std');
+    expect(osd.value).toBe('banner');
+    fireEvent.change(osd, { target: { value: 'osd_lock' } });
+    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PATCH' && p === '/groups/1' && b.hide_tv_osd === 'osd_lock')).toBe(true));
+    fireEvent.change(screen.getByLabelText('banner select Std'), { target: { value: '0' } });
+    await waitFor(() => expect(state.calls.some(([m, p, b]) => m === 'PATCH' && p === '/groups/1' && b.banner_select === 0)).toBe(true));
   });
 });

@@ -9,7 +9,7 @@ function isFactoryRoom(v) { return !v || FACTORY_ROOM.test(String(v)); }
 
 function createStateBuilder(db, { pollIntervalS = 60, apps = null, pms = null } = {}) {
   const resolveLayout = makeLayoutResolver(db);
-  const findGroup = db.prepare('SELECT id, name, instant_power, vacant_layout_id, welcome_popup_s FROM groups WHERE id = ? AND tenant_id = ?');
+  const findGroup = db.prepare('SELECT id, name, instant_power, vacant_layout_id, welcome_popup_s, hide_tv_osd, banner_select FROM groups WHERE id = ? AND tenant_id = ?');
   const layoutById = db.prepare('SELECT * FROM layouts WHERE id = ? AND tenant_id = ?');
   const pendingCommands = db.prepare(`SELECT id, type, payload_json FROM commands
     WHERE set_id = ? AND status IN ('queued','sent') ORDER BY id`);
@@ -63,6 +63,7 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null, pms = null } 
       room_number: set.room_number,
       group: group ? { id: group.id, name: group.name } : null,
       instant_power: group && group.instant_power != null ? group.instant_power : null,   // desired LG instant_power (0/1/2/10)
+      tv_osd: tvOsdOf(group),   // D4b: {mode: off|banner|osd_lock, banner_select: 0|1}; the default (no group) hides the banner
       context: context(tenant, set),
       layout: layoutFor(tenant, set, group),
       lineup: lineup.channels,
@@ -81,6 +82,13 @@ function createStateBuilder(db, { pollIntervalS = 60, apps = null, pms = null } 
   return { build, resolveLayout, resolveLineup, context, commandsFor };
 }
 
+// "Hide TV's own OSD" setting of a group; sets without a group get the default (banner hidden).
+const TV_OSD_DEFAULT = { mode: 'banner', banner_select: 1 };
+function tvOsdOf(group) {
+  if (!group) return { ...TV_OSD_DEFAULT };
+  return { mode: group.hide_tv_osd || TV_OSD_DEFAULT.mode, banner_select: group.banner_select == null ? TV_OSD_DEFAULT.banner_select : Number(group.banner_select) };
+}
+
 function safeJson(s, fallback = {}) { try { return s == null ? fallback : JSON.parse(s); } catch { return fallback; } }
 
-module.exports = { createStateBuilder, isFactoryRoom, safeJson };
+module.exports = { createStateBuilder, isFactoryRoom, safeJson, tvOsdOf, TV_OSD_DEFAULT };

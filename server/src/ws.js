@@ -40,7 +40,7 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
         socket.destroy();
         return;
       }
-      wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, req, tenant, set));
+      wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, req, tenant, set, url.searchParams));
     });
     const timer = setInterval(() => {
       for (const [setId, c] of conns) {
@@ -53,7 +53,7 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
     server.on('close', () => clearInterval(timer));
   }
 
-  function onConnection(ws, req, tenant, set) {
+  function onConnection(ws, req, tenant, set, query = new URLSearchParams()) {
     const prev = conns.get(set.id);
     if (prev && prev.ws !== ws) { try { prev.ws.close(4000, 'replaced'); } catch { /* ignore */ } }
     const conn = { ws, tenantId: tenant.id, setId: set.id, alive: true, sent: {} };
@@ -73,15 +73,23 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
     ws.on('error', (err) => log(`ws: set ${set.id} error ${err.message}`));
 
     // The TV already holds the state it got from register/poll; remember it so refresh()
-    // only pushes real changes from here on.
-    try {
-      const st = state.build(tenant, set);
-      conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power);
-      conn.sent.lineup = JSON.stringify(st.lineup);
-      conn.sent.messages = JSON.stringify(st.messages);
-      conn.sent.apps = JSON.stringify(st.apps || []);
-    } catch (e) { log(`ws: state build failed for set ${set.id}: ${e.message}`); }
+    // only pushes real changes from here on — unless the set says (sv= in the query) that its
+    // state is older than the tenant's current state_version: anything that changed between its
+    // register answer and this connect would otherwise be lost until the next poll/boot (D4b).
+    const clientVersion = query.get('sv') != null && query.get('sv') !== '' ? Number(query.get('sv')) : null;
+    const current = (findTenant.get(tenant.id) || {}).state_version || 1;
+    const behind = clientVersion != null && Number.isFinite(clientVersion) && clientVersion < current;
+    if (!behind) {
+      try {
+        const st = state.build(tenant, set);
+        conn.sent.layout = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power) + JSON.stringify(st.tv_osd);
+        conn.sent.lineup = JSON.stringify(st.lineup);
+        conn.sent.messages = JSON.stringify(st.messages);
+        conn.sent.apps = JSON.stringify(st.apps || []);
+      } catch (e) { log(`ws: state build failed for set ${set.id}: ${e.message}`); }
+    } else log(`ws: set ${set.id} connected with state v${clientVersion} < v${current} — pushing the current state`);
     sendJson(ws, { type: 'hello', set_id: set.id, server_time: new Date().toISOString() });
+    if (behind) refresh(tenant.id, { setIds: [set.id], bump: false });
     // Deliver anything queued while the set was away.
     const pending = state.commandsFor(set);
     for (const c of pending) sendJson(ws, { type: 'command', command: c });
@@ -126,7 +134,7 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
         const tenant = findTenant.get(tenantId);
         if (name === 'tv_apps_status') apps.recordStatus(tenant, { id: setId }, payload.status);
         else if (name === 'tv_apps_list') apps.record(tenant, findSet.get(setId, tenantId) || { id: setId }, payload.apps);
-        else apps.recordRegistration(tenant, findSet.get(setId, tenantId) || { id: setId }, { ok: payload.ok, result: payload.result, results: payload.results });
+        else apps.recordRegistration(tenant, findSet.get(setId, tenantId) || { id: setId }, { ok: payload.ok, result: payload.result, results: payload.results, internet: payload.internet });
         refresh(tenantId, { setIds: [setId] });
       } catch (e) { log(`apps status for set ${setId} failed: ${e.message}`); }
     }
@@ -140,11 +148,11 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
   // Recompute layout (and later lineup) for connected sets and push what changed.
   // setIds: restrict to some sets; otherwise every connected set of the tenant.
   const bumpVersion = db.prepare('UPDATE tenants SET state_version = state_version + 1 WHERE id = ?');
-  function refresh(tenantId, { setIds = null, force = false } = {}) {
+  function refresh(tenantId, { setIds = null, force = false, bump = true } = {}) {
     // Every refresh follows a change that can reach the sets: advance the tenant's state version
     // first so whatever goes out (and whatever a poll answers) carries a number newer than the
-    // bundle's state.json and the sets' caches.
-    bumpVersion.run(tenantId);
+    // bundle's state.json and the sets' caches. (bump:false = a catch-up push at connect, nothing changed.)
+    if (bump) bumpVersion.run(tenantId);
     const tenant = findTenant.get(tenantId);
     if (!tenant) return 0;
     let pushed = 0;
@@ -155,10 +163,10 @@ function createHub({ db, tenants, state, apps = null, log = () => {} }) {
       if (!set) continue;
       const st = state.build(tenant, set);
       let touched = false;
-      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power);
+      const layoutKey = JSON.stringify(st.layout) + JSON.stringify(st.context) + String(st.instant_power == null ? '' : st.instant_power) + JSON.stringify(st.tv_osd);
       if (force || c.sent.layout !== layoutKey) {
         c.sent.layout = layoutKey;
-        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, instant_power: st.instant_power, state_version: st.state_version });
+        sendJson(c.ws, { type: 'layout', layout: st.layout, context: st.context, room_number: st.room_number, group: st.group, instant_power: st.instant_power, tv_osd: st.tv_osd, state_version: st.state_version });
         touched = true;
       }
       const lineupKey = JSON.stringify(st.lineup);

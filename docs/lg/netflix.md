@@ -109,3 +109,11 @@ server kept `status_ids` but sent no `tokenList`). The sets see the reason in
 Local origin of the remote-deploy bundle on the 43UM670H0UA (webOS 8.3): `http://127.0.0.1:8051`
 — the set serves the unzipped app from a loopback HTTP server. Port stability across boots is
 still to be verified (TV test plan D4 step 15).
+
+### Connectivity (D4b)
+
+A `tokenResult: "fail"` while `network/configuration/get` reports `isInternetConnectionAvailable:
+false` is not a licence failure: the set reports it with `internet: false` / `offline: true`, the
+server does not count it, and the registration is re-run as soon as
+`idcap::network_event_received` says the internet is back (`trigger: "network_restored"`).
+Nothing is sent to LG while the set has no internet.

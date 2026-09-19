@@ -7,7 +7,7 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
   window.__fake = {
     props: Object.assign({ idpn: '306', serial_number: ${JSON.stringify(serial)}, model_name: '43UM670H0UA', platform_version: '8.3.0',
       firmware_version: '03.25.80', webos_version: '8.3.0', room_number: '[TV]' + ${JSON.stringify(serial)}, display_resolution: '1920x1080' }, ${JSON.stringify(overrides)}),
-    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}, serviceCountry: ${JSON.stringify(overrides.__serviceCountry === undefined ? 'NL' : overrides.__serviceCountry)}, hideUntilRegistered: ${JSON.stringify(overrides.__hideUntilRegistered || [])}, tokenResults: ${JSON.stringify(overrides.__tokenResults || {})}
+    calls: [], channel: null, media: null, videoSize: null, keys: {}, volume: 20, mute: false, powerMode: 'NORMAL', toasts: [], launched: [], rebooted: 0, noSignal: 'default', propertyRules: ${JSON.stringify(overrides.__propertyRules || {})}, input: ${JSON.stringify(overrides.__input || { type: 'TV', index: 0 })}, appList: ${JSON.stringify(overrides.__appList || null)}, appAuth: ${JSON.stringify(overrides.__appAuth || { netflix: 'unregistered' })}, serviceCountry: ${JSON.stringify(overrides.__serviceCountry === undefined ? 'NL' : overrides.__serviceCountry)}, hideUntilRegistered: ${JSON.stringify(overrides.__hideUntilRegistered || [])}, tokenResults: ${JSON.stringify(overrides.__tokenResults || {})}, internet: ${JSON.stringify(overrides.__internet === undefined ? true : overrides.__internet)}, internetDropsOnRegister: ${JSON.stringify(!!overrides.__internetDropsOnRegister)}, installer: ${JSON.stringify(overrides.__installer || { 107: 0 })}, installerSets: []
   };
   window.__fakeEvent = function (name, detail) { var ev = new Event(name); Object.assign(ev, detail || {}); document.dispatchEvent(ev); };
   window.idcap = { API_VERSION: 'fake-1.1.1', request: function (uri, o) {
@@ -65,8 +65,10 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
           // Real 43UM670H0UA: one application_registration_result_received per token, tokenResult
           // is the string "success" / "fail" (docs/lg/netflix.md wrongly implied a boolean).
           var tr = f.tokenResults || {};
+          // network-pull test: the internet drops the moment register is called → every token "fail"s
+          if (f.internetDropsOnRegister) { f.internet = false; f.internetDropsOnRegister = false; }
           if (p.tokenList) p.tokenList.forEach(function (t, i) {
-            var res = tr[t.id] || 'success';
+            var res = f.internet ? (tr[t.id] || 'success') : 'fail';
             if (res === 'success') { f.appAuth = f.appAuth || {}; f.appAuth[t.id] = 'registered'; }
             setTimeout(function () { window.__fakeEvent('idcap::application_registration_result_received', res === 'success' ? { id: t.id, tokenResult: 'success' } : { id: t.id, tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE' }); }, 30 + i * 20);
           });
@@ -81,7 +83,10 @@ module.exports = function fakeIdcap(serial = '305MAXX1Z123', overrides = {}) {
           { id: 'com.webos.app.browser', title: 'Web Browser', type: 'web' }]).filter(function (a) { return f.hideUntilRegistered.indexOf(a.id) < 0 || (f.appAuth || {})[a.id] === 'registered'; }) }); break;
         case 'idcap://procentric/application/launch': f.launched.push({ reload: true }); ok(); break;
         case 'idcap://tv/checkout/request': f.checkedOut = true; ok(); break;
-        case 'idcap://network/configuration/get': ok({ wired: { state: 'connected', ipAddress: '10.0.0.5' }, isInternetConnectionAvailable: true }); break;
+        case 'idcap://network/configuration/get': ok({ wired: { state: 'connected', ipAddress: '10.0.0.5' }, isInternetConnectionAvailable: !!f.internet }); break;
+        // Installer Menu items by number (hcap.js InstallerMenuItem: BANNER_SELECT = 107); unknown item → failure
+        case 'idcap://configuration/installermenuitem/get': (typeof p.item === 'number' && p.item in f.installer) ? ok({ item: p.item, value: f.installer[p.item] }) : fail('IDCAP_RESULT_FAILURE'); break;
+        case 'idcap://configuration/installermenuitem/set': if (typeof p.item === 'number' && p.item in f.installer) { f.installer[p.item] = p.value; f.installerSets.push(p); ok(); } else fail('IDCAP_RESULT_FAILURE'); break;
         default: ok();
       }
     }, 10);

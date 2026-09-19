@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { zipBuffer } = require('./zip');
 const { readZip } = require('./xlsx');
 const { parseLayoutRow } = require('./layout');
+const { tvOsdOf, TV_OSD_DEFAULT } = require('./state');
 const { rowToApi: channelToApi } = require('./channels');
 
 const RENDERER_FILE = /^(index\.html|probe\.html|app\.[0-9a-f]+\.js|version\.txt|zones\.css|lib\/.+|fonts\/.+)$/;
@@ -108,7 +109,7 @@ function createBundler({ db, tenantsDir, apps = null, state = null, publicHost =
     const lineups = {};
     for (const lu of qLineups.all(t.id)) lineups[lu.id] = { id: lu.id, name: lu.name, channels: qLineupItems.all(lu.id).map(channelToApi) };
     const groups = qGroups.all(t.id).map((g) => ({ id: g.id, name: g.name, layout_id: g.layout_id || null, lineup_id: g.lineup_id || null, vacant_layout_id: g.vacant_layout_id || null,
-      instant_power: g.instant_power == null ? null : g.instant_power, apps: apps ? apps.enabledFor(t, { group_id: g.id, id: null }) : [] }));
+      instant_power: g.instant_power == null ? null : g.instant_power, tv_osd: tvOsdOf(g), apps: apps ? apps.enabledFor(t, { group_id: g.id, id: null }) : [] }));
     const context = state ? state.context(t, { room_number: '', serial: '' }) : {};
     delete context.room; delete context.serial;
     return {
@@ -116,6 +117,7 @@ function createBundler({ db, tenantsDir, apps = null, state = null, publicHost =
       bundle: { version: t.bundle_version || 0, build: distBuild(t) },
       context, checkout_message: st.checkout_message || null, poll_interval_s: 60,
       default_layout_id: t.default_layout_id || null, default_lineup_id: t.default_lineup_id || null,
+      tv_osd_default: { ...TV_OSD_DEFAULT },   // D4b: sets without a group
       layouts, lineups, groups,
       activation: apps ? apps.registerPayload(t) : null,
     };

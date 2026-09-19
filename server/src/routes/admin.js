@@ -183,8 +183,12 @@ function createAdminRouter({ db, auth, hub, commands, screenshots = null, log = 
     }
     let welcome = g.welcome_popup_s;
     if ('welcome_popup_s' in b) { const n = Number(b.welcome_popup_s); if (!Number.isInteger(n) || n < 0 || n > 600) return res.status(400).json({ error: 'welcome_popup_s must be 0–600 seconds' }); welcome = n; }
+    // D4b: "Hide TV's own OSD" — off | banner (Installer Menu 107 BANNER_SELECT) | osd_lock (banner + property osd_lock while the portal is in front)
+    let hideOsd = g.hide_tv_osd || 'banner', bannerSelect = g.banner_select == null ? 1 : g.banner_select;
+    if ('hide_tv_osd' in b) { if (!['off', 'banner', 'osd_lock'].includes(b.hide_tv_osd)) return res.status(400).json({ error: 'hide_tv_osd must be off, banner or osd_lock' }); hideOsd = b.hide_tv_osd; }
+    if ('banner_select' in b) { if (![0, 1].includes(Number(b.banner_select))) return res.status(400).json({ error: 'banner_select must be 0 or 1' }); bannerSelect = Number(b.banner_select); }
     try {
-      db.prepare('UPDATE groups SET name = ?, description = ?, instant_power = ?, vacant_layout_id = ?, welcome_popup_s = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, instantPower, vacant, welcome, g.id);
+      db.prepare('UPDATE groups SET name = ?, description = ?, instant_power = ?, vacant_layout_id = ?, welcome_popup_s = ?, hide_tv_osd = ?, banner_select = ? WHERE id = ?').run(name, 'description' in b ? str(b.description, 500) : g.description, instantPower, vacant, welcome, hideOsd, bannerSelect, g.id);
     } catch (e) { return res.status(409).json({ error: 'a group with that name exists' }); }
     let queued = 0;
     if ('instant_power' in b && instantPower !== g.instant_power && instantPower != null) {

@@ -33,6 +33,7 @@ var state = {
   pollInterval: 60, pollTimer: null, clockTimer: null, ws: null, wsUrl: null, wsBackoff: 0, wsTimer: null, hbTimer: null,
   bootTime: Date.now(), volume: null, muted: null, powerMode: null, messages: [], bannerTimer: null, messageTimer: null,
   apps: [], appsReported: null, appsStatus: null, hiddenAt: null, activation: null, registering: false, bootRegistered: false, bootPromise: null, appsHold: false, pendingApps: null, serviceCountry: null,
+  internet: null, registerWaitsForNetwork: false, tvOsd: null, tvOsdResult: null, osdPromise: null, osdLock: null,
   online: null, source: null, cachedAt: null, stateVersion: 0
 };
 
@@ -637,6 +638,7 @@ function applyState(data, opts) {
   if (data.apps) applyApps(data.apps);
   if (data.poll_interval_s) state.pollInterval = Math.max(10, Number(data.poll_interval_s));
   if (data.activation !== undefined) { state.activation = data.activation || null; bootRegisterApps(); }   // before commands: register_apps waits for it
+  if (data.tv_osd !== undefined) applyTvOsd(data.tv_osd);
   if (opts.offline) return;   // cached/bundled state: no stale commands, no WS until the server answers
   if (data.commands && data.commands.length) data.commands.forEach(function (c) { runCommand(c, ackViaHttp); });
   if (data.ws_url && !state.ws) { state.wsUrl = data.ws_url; connectWs(); }
@@ -703,7 +705,8 @@ function stateFromBundle(b, cached) {
   ctx.room = room; ctx.serial = state.props.serial_number || '';
   ['guest', 'guest_first', 'guest_last', 'checkin_date', 'checkout_date', 'nights'].forEach(function (k) { if (ctx[k] == null) ctx[k] = ''; });
   return { context: ctx, layout: layout || localLayout('Waiting for the server (' + (b.tenant_host || '?') + ')\nThis set has not been registered yet.'), lineup: lineup, messages: [], apps: group ? (group.apps || []) : [],
-    group: group ? { id: group.id, name: group.name } : null, room_number: room || null, activation: b.activation || null, poll_interval_s: b.poll_interval_s || 60, ws_url: '/ws/tv', state_version: Number(b.state_version) || 0 };
+    group: group ? { id: group.id, name: group.name } : null, room_number: room || null, activation: b.activation || null, poll_interval_s: b.poll_interval_s || 60, ws_url: '/ws/tv', state_version: Number(b.state_version) || 0,
+    tv_osd: (group && group.tv_osd) || b.tv_osd_default || null };
 }
 // Boot: draw from cache or bundle immediately, then keep trying the server.
 function offlineFirst() {
@@ -731,9 +734,16 @@ function offlineFirst() {
       log('running from the bundled state.json v' + bv + ' (' + (bundled.generated_at || '?') + ')' + (cached ? ', cache had v' + cv : '') + ' until the server answers');
       showStatus(false);
     } else state.source = 'none';
-    sendEvent('boot', { origin: (window.location && window.location.origin) || null, protocol: window.location && window.location.protocol, href: window.location && String(window.location.href).slice(0, 200),
+    // captured now: by the time the OSD read-back is in, the server may already have answered
+    // and moved state.source on to 'server'
+    var bootPayload = { origin: (window.location && window.location.origin) || null, protocol: window.location && window.location.protocol, href: window.location && String(window.location.href).slice(0, 200),
       source: state.source, state_source: state.source, state_version: state.stateVersion, cache_version: cached ? cv : null, bundle_state_version: bundled ? bv : null, bundled: API.bundled, bundle_version: API.bundleVersion, cached_at: state.cachedAt,
-      activation: state.activation ? { tokens: (state.activation.tokenList || []).map(function (t) { return t.id; }), status_ids: state.activation.status_ids || [], withheld: state.activation.withheld || [] } : null });
+      activation: state.activation ? { tokens: (state.activation.tokenList || []).map(function (t) { return t.id; }), status_ids: state.activation.status_ids || [], withheld: state.activation.withheld || [] } : null,
+      internet: state.internet, tv_osd: null };
+    var sendBoot = function () { bootPayload.tv_osd = state.tvOsdResult; sendEvent('boot', bootPayload); };   // tv_osd = the value read back (null when no state carried a setting yet — a tv_osd event follows)
+    // the OSD setting of a cached/bundled state is applied before the boot event so it can carry the read-back
+    var osd = state.osdPromise ? Promise.race([state.osdPromise, new Promise(function (r) { setTimeout(r, 4000); })]) : Promise.resolve();
+    return osd.then(sendBoot, sendBoot);
   });
 }
 
@@ -861,7 +871,9 @@ function connectWs() {
   if (!state.wsUrl || typeof WebSocket === 'undefined') return;
   if (state.wsTimer) { clearTimeout(state.wsTimer); state.wsTimer = null; }
   var proto = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-  var url = (API.base ? API.base.replace(/^http/, 'ws') : proto + window.location.host) + state.wsUrl + authQs() + (API.tenant ? '&tenant=' + encodeURIComponent(API.tenant) : '');
+  // sv = the state_version this set holds: the hub pushes the current state at connect when the
+  // tenant moved on in between (a change made between our register answer and this connect)
+  var url = (API.base ? API.base.replace(/^http/, 'ws') : proto + window.location.host) + state.wsUrl + authQs() + (API.tenant ? '&tenant=' + encodeURIComponent(API.tenant) : '') + '&sv=' + encodeURIComponent(Number(state.stateVersion) || 0);
   var ws;
   try { ws = new WebSocket(url); } catch (e) { log('ws error: ' + e.message); scheduleWsReconnect(); return; }
   state.ws = ws;
@@ -900,7 +912,10 @@ function onWsMessage(msg) {
       if (msg.room_number !== undefined && msg.context) msg.context.room = msg.room_number || '';
       applyLayout(msg.layout, msg.context || state.context, !!msg.preview, msg.page || null);
       if (msg.preview) log('preview layout from admin');
-      else patchCache({ layout: msg.layout, context: msg.context || state.context, room_number: msg.room_number, group: msg.group, instant_power: msg.instant_power }, msg.state_version);
+      else {
+        patchCache({ layout: msg.layout, context: msg.context || state.context, room_number: msg.room_number, group: msg.group, instant_power: msg.instant_power, tv_osd: msg.tv_osd }, msg.state_version);
+        if (msg.tv_osd !== undefined) applyTvOsd(msg.tv_osd);
+      }
       break;
     case 'lineup': applyLineup(msg.lineup); patchCache({ lineup: msg.lineup, lineup_id: msg.lineup_id }, msg.state_version); break;
     case 'messages': applyMessages(msg.messages); patchCache({ messages: msg.messages }, msg.state_version); break;
@@ -981,12 +996,14 @@ function resumeFromBackground() {
       if (z) placeVideo(z); else state.videoPaused = false;
     }
     sendEvent('visibility', { hidden: false, resumed: true, away_s: away });
+    restoreOsdLock('resumed');
   });
 }
 function preparePlatform() {
   // Claim the keys the lineup needs; leave VOL/MUTE with the TV firmware. Then make sure the
   // set is on the TV input so no external-input OSD covers the layout.
-  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput).then(readAppList);
+  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput).then(readAppList)
+    .then(function () { return checkInternet().then(function (net) { log('internet: ' + net); }); });
 }
 function readAppList() {
   return tv.listApps().then(function (r) {
@@ -1051,9 +1068,17 @@ function registerApps(payload) {
   tokens.forEach(function (t) { seq = seq.then(function () { return registerOne({ tokenList: [t] }, t.id).then(function (r) { results.push(r); log('application/register ' + t.id + ': ' + (r.tokenResult == null ? 'no result' : r.tokenResult)); }); }); });
   if (!tokens.length && payload && payload.accountNumber) seq = seq.then(function () { return registerOne({ accountNumber: payload.accountNumber }, 'account').then(function (r) { results.push(r); }); });
   return seq.then(function () {
-    var oks = results.map(function (r) { return r.ok; });
-    var ok = !results.length ? null : oks.some(function (o) { return o === false; }) ? false : oks.every(function (o) { return o === true; }) ? true : null;
-    return { ok: ok, result: results.length ? results[0].raw || null : { timeout: true }, results: results.map(function (r) { return { id: r.id, tokenResult: r.tokenResult, errorMessage: r.errorMessage, ok: r.ok }; }), timeout: results.some(function (r) { return r.timeout; }) };
+    // A "fail" (or timeout) while the set has no internet is a connectivity problem, not a bad
+    // licence: it is reported with internet:false, never counted, and retried when the network
+    // comes back (network_event_received).
+    var anyBad = results.some(function (r) { return r.ok !== true; });
+    return (anyBad ? checkInternet() : Promise.resolve(state.internet)).then(function (net) {
+      var offline = anyBad && net === false;
+      if (offline) { results.forEach(function (r) { if (r.ok !== true) { r.ok = null; r.offline = true; } }); state.registerWaitsForNetwork = true; }
+      var oks = results.map(function (r) { return r.ok; });
+      var ok = !results.length ? null : oks.some(function (o) { return o === false; }) ? false : oks.every(function (o) { return o === true; }) ? true : null;
+      return { ok: ok, internet: net, offline: offline, result: results.length ? results[0].raw || null : { timeout: true }, results: results.map(function (r) { return { id: r.id, tokenResult: r.tokenResult, errorMessage: r.errorMessage, ok: r.ok, offline: r.offline || undefined }; }), timeout: results.some(function (r) { return r.timeout; }) };
+    });
   });
 }
 function tokenOk(ev) {
@@ -1068,13 +1093,14 @@ function tokenOk(ev) {
 // say authorised (auth === true). A failed or missing status for a licensed id counts as not
 // authorised. Never an authorised app (LG resets its sign-in). Sends apps_registration_reason
 // with the evidence.
-function registrationPlan(payload, trigger) {
+function registrationPlan(payload, trigger, net) {
   var tokens = payload && Array.isArray(payload.tokenList) ? payload.tokenList : [];
   var ids = reportedAppIds(), st = state.appsStatus || {};
   var apps = tokens.map(function (t) { var id = t && t.id; return { id: id, in_list: ids.indexOf(id) >= 0, status: st[id] === undefined ? null : st[id], activated: statusActivated(st[id]) }; });
   var send = tokens.filter(function (t, i) { return apps[i].activated !== true; });
-  var out = { trigger: trigger, apps: apps, sending: send.map(function (t) { return t.id; }), account: !!(payload && payload.accountNumber) };
+  var out = { trigger: trigger, apps: apps, sending: send.map(function (t) { return t.id; }), account: !!(payload && payload.accountNumber), internet: net === undefined ? state.internet : net };
   if (!send.length && !(payload && payload.accountNumber)) out.skipped = tokens.length ? 'every licensed app reports auth: true' : 'nothing to register';
+  else if (net === false) { out.skipped = 'no internet connection (network/configuration/get) — retried when the network comes back'; out.postponed = out.sending; }
   sendEvent('apps_registration_reason', out);
   log('app registration (' + trigger + '): ' + (out.skipped ? 'skipped — ' + out.skipped : 'sending ' + (out.sending.join(',') || 'account number')));
   var p = {};
@@ -1091,11 +1117,16 @@ function registerAndRefresh(payload, trigger, statusFresh) {
   var ids = licensedIds();
   (payload && Array.isArray(payload.tokenList) ? payload.tokenList : []).forEach(function (t) { if (t && t.id && ids.indexOf(t.id) < 0) ids.push(t.id); });
   var pre = statusFresh ? Promise.resolve() : readAppStatus(ids).then(function (st) { if (st) sendEvent('apps_status', { status: st }); });
-  return pre.then(function () {
-    var r = registrationPlan(payload, trigger || 'command');
+  return pre.then(function () { return checkInternet(); }).then(function (net) {
+    var r = registrationPlan(payload, trigger || 'command', net);
     if (!r.payload) { done(); return { ok: true, skipped: r.plan.skipped, results: [] }; }
+    if (net === false) {   // nothing is sent to LG without internet; network_event_received re-runs this
+      state.registerWaitsForNetwork = true;
+      log('app registration (' + (trigger || 'command') + ') postponed: no internet connection');
+      done(); return { ok: true, skipped: 'no internet connection', internet: false, results: [] };
+    }
     return registerApps(r.payload).then(function (res) {
-      sendEvent('apps_registration', { ok: res.ok, result: res.result, results: res.results, sent: r.plan.sending, trigger: trigger || 'command' });
+      sendEvent('apps_registration', { ok: res.ok, result: res.result, results: res.results, sent: r.plan.sending, trigger: trigger || 'command', internet: res.internet, offline: res.offline || undefined });
       // controlled apps only appear in application/list once registered → re-read list + status
       return readAppList().then(function () { return readAppStatus(ids); }).then(function () {
         if (state.appsReported) sendEvent('apps_list', { apps: state.appsReported });
@@ -1140,11 +1171,85 @@ function bootRegisterApps() {
     }
     return registerAndRefresh({ tokenList: tokens }, 'boot', true).then(function (res) {
       if (res.skipped) return res;
+      if (res.offline) { log('boot registration not counted: no internet connection'); return res; }
       log('boot registration ' + (res.ok === false ? 'FAILED' : 'done'));
       if (res.ok === false) reportError('app_registration', 'licence registration failed: ' + JSON.stringify(res.results || res.result), { apps: (res.results || []).filter(function (r) { return r.ok === false; }).map(function (r) { return r.id; }) });
       return res;
     });
   }).then(function (res) { release(); return res; }, function (e) { release(); reportError('app_registration', 'licence registration: ' + e.message); });
+}
+// ---------------------------------------------------------------- network (D4b)
+// isInternetConnectionAvailable from network/configuration/get; null = unknown (HCAP, call failed).
+function checkInternet() {
+  if (!state.api) return Promise.resolve(null);
+  return tv.getNetwork().then(function (n) { state.internet = n.internet; return n.internet; });
+}
+// idcap::network_event_received / network_changed: when the internet comes back and a licensed
+// app is still not authorised, run status → register → re-read right away (no reboot needed).
+function onNetworkEvent(ev) {
+  var before = state.internet;
+  checkInternet().then(function (now) {
+    sendEvent('network', { internet: now, was: before, event: ev && ev.type ? String(ev.type) : null });
+    if (now !== true || before === true) return;
+    if (state.api !== 'idcap') return;
+    var a = state.activation || {}, tokens = Array.isArray(a.tokenList) ? a.tokenList : [];
+    if (!tokens.length) return;
+    var st = state.appsStatus || {};
+    var pending = licensedIds().filter(function (id) { return statusActivated(st[id]) !== true; });
+    if (!pending.length && !state.registerWaitsForNetwork) return;
+    state.registerWaitsForNetwork = false;
+    log('internet restored: ' + (pending.length ? pending.join(',') + ' not authorised' : 'registration was postponed') + ' → status → register → re-read');
+    (state.bootPromise || Promise.resolve()).then(function () {
+      if (state.registering) return null;
+      state.appsHold = true;
+      return registerAndRefresh({ tokenList: tokens }, 'network_restored', false).then(function (res) {
+        state.appsHold = false; if (state.pendingApps) { var pa = state.pendingApps; state.pendingApps = null; applyApps(pa); }
+        if (res && res.ok === false) reportError('app_registration', 'licence registration after network restore failed: ' + JSON.stringify(res.results));
+      }, function (e) { state.appsHold = false; reportError('app_registration', 'registration after network restore: ' + e.message); });
+    });
+  });
+}
+// ---------------------------------------------------------------- TV's own OSD (D4b)
+// LG draws its channel-change banner over the portal at boot (the last RF channel, not ours).
+// Group setting tv_osd {mode: off|banner|osd_lock, banner_select: 0|1}: 'banner' writes Installer
+// Menu item 107 BANNER_SELECT; 'osd_lock' additionally holds property osd_lock="1" while the
+// portal is in front (released before an app launch / on_destroy / pagehide, restored on return).
+// Every application is reported as a tv_osd event; the boot event carries the read-back.
+function applyTvOsd(cfg) {
+  cfg = cfg && typeof cfg === 'object' ? cfg : null;
+  var key = JSON.stringify(cfg);
+  if (!state.api || key === JSON.stringify(state.tvOsd)) return state.osdPromise || Promise.resolve(state.tvOsdResult);
+  state.tvOsd = cfg;
+  var mode = cfg && cfg.mode ? String(cfg.mode) : 'off';
+  var want = cfg && cfg.banner_select != null ? Number(cfg.banner_select) : 1;
+  var out = { mode: mode, banner_select: null, osd_lock: null };
+  var p = Promise.resolve();
+  if (mode !== 'off') {
+    p = p.then(function () { return tv.getInstallerMenuItem(tv.INSTALLER_ITEMS.BANNER_SELECT); }).then(function (before) {
+      out.banner_select = { item: tv.INSTALLER_ITEMS.BANNER_SELECT, before: before, wanted: want };
+      if (before != null && Number(before) === want) { out.banner_select.after = before; out.banner_select.unchanged = true; return null; }
+      return tv.setInstallerMenuItem(tv.INSTALLER_ITEMS.BANNER_SELECT, want).then(function (sent) { out.banner_select.sent = sent; return tv.getInstallerMenuItem(tv.INSTALLER_ITEMS.BANNER_SELECT); }).then(function (after) { out.banner_select.after = after; });
+    }, function (e) { out.banner_select = { item: tv.INSTALLER_ITEMS.BANNER_SELECT, wanted: want, error: e.message }; }).then(null, function (e) { out.banner_select.error = e.message; });
+  }
+  p = p.then(function () { return mode === 'osd_lock' ? setOsdLock('1', 'boot') : (state.osdLock === '1' ? setOsdLock('0', 'setting off') : null); }).then(function (r) { if (r) out.osd_lock = r; });
+  state.osdPromise = p.then(function () {
+    state.tvOsdResult = out; state.osdPromise = null;
+    log('tv osd: ' + JSON.stringify(out));
+    sendEvent('osd', out);
+    return out;
+  }, function (e) { state.osdPromise = null; out.error = e.message; state.tvOsdResult = out; sendEvent('osd', out); return out; });
+  return state.osdPromise;
+}
+function setOsdLock(value, why) {
+  return tv.setPropertyVerified('osd_lock', value).then(function (r) { state.osdLock = String(r.back); return { value: r.back, why: why }; }, function (e) { return { wanted: value, why: why, error: e.message }; });
+}
+function releaseOsdLock(why) {
+  if (!state.api || !(state.tvOsd && state.tvOsd.mode === 'osd_lock') || state.osdLock !== '1') return Promise.resolve(null);
+  return setOsdLock('0', why).then(function (r) { sendEvent('osd', { osd_lock: r }); return r; });
+}
+function restoreOsdLock(why) {
+  if (!state.api || !(state.tvOsd && state.tvOsd.mode === 'osd_lock') || state.osdLock === '1') return Promise.resolve(null);
+  return setOsdLock('1', why).then(function (r) { sendEvent('osd', { osd_lock: r }); return r; });
 }
 // Launch an app with LG's parameters. Netflix (docs/lg/netflix.md) needs the tenant's hotel id and
 // a reason: 'launcher' (tile/menu/command), 'hotKey' (remote key while ON), 'boot' with
@@ -1157,6 +1262,9 @@ function netflixParams(reason) {
 }
 function launchApp(appId, params, noSplash, source) {
   sendEvent('app', { kind: 'launch', app_id: appId, source: source || 'launcher' });
+  return releaseOsdLock('launch ' + appId).then(function () { return launchAppNow(appId, params, noSplash, source); });
+}
+function launchAppNow(appId, params, noSplash, source) {
   if (appId !== 'netflix') return tv.launchApp(appId, params, noSplash).then(function () { return params || {}; });
   if (!(state.context && state.context.netflix_hotel_id)) {
     showPopup('Netflix is not enabled for this hotel', 6);
@@ -1186,7 +1294,10 @@ function boot() {
     else { log('channel_changed failure ignored (no tuner channel selected): ' + (ev.errorMessage || 'failed')); sendEvent('channel_event', { ignored: true, error: ev.errorMessage || 'failed', channel: state.channel ? state.channel.number : null }); }
   });
   ['play_error', 'media_error', 'media_play_error'].forEach(function (n) { tv.on(n, function (ev) { reportError('media_event', n + ': ' + ((ev && (ev.errorMessage || ev.message)) || JSON.stringify(ev && ev.detail || {}))); }); });
-  ['play_start', 'play_end', 'buffering_start', 'buffering_end', 'network_changed', 'checkout'].forEach(function (n) { tv.on(n, function () { sendEvent('platform', { kind: n }); }); });
+  ['play_start', 'play_end', 'buffering_start', 'buffering_end', 'checkout'].forEach(function (n) { tv.on(n, function () { sendEvent('platform', { kind: n }); }); });
+  ['network_event_received', 'network_changed'].forEach(function (n) { tv.on(n, onNetworkEvent); });
+  tv.on('on_destroy', function () { releaseOsdLock('on_destroy'); });
+  ['pagehide', 'unload'].forEach(function (n) { window.addEventListener(n, function () { if (state.osdLock === '1' && state.api) { try { tv.setProperty('osd_lock', '0'); } catch (e) {} } }); });
   window.addEventListener('error', function (e) { reportError('js', (e && e.message) || 'script error', { source: e && e.filename, line: e && e.lineno }); });
   tv.on('power_mode_changed', function (ev) { state.powerMode = ev && ev.mode ? String(ev.mode) : state.powerMode; sendEvent('power', { mode: state.powerMode }); });
   document.addEventListener('visibilitychange', function () {

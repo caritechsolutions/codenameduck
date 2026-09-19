@@ -79,7 +79,7 @@ export function detect() {
 function wireEvents() {
   var prefix = api === 'idcap' ? 'idcap::' : '';
   ['channel_changed', 'play_start', 'play_end', 'play_error', 'seek_done', 'buffering_start', 'buffering_end',
-   'media_error', 'media_play_error', 'power_mode_changed', 'checkout', 'network_changed', 'application_registration_result_received'].forEach(function (name) {
+   'media_error', 'media_play_error', 'power_mode_changed', 'checkout', 'network_changed', 'network_event_received', 'application_registration_result_received', 'on_destroy'].forEach(function (name) {
     document.addEventListener(prefix + name, function (ev) { emit(name, ev); }, false);
   });
 }
@@ -295,6 +295,40 @@ export function getPowerMode() {
 export function getServiceCountry() {
   if (api !== 'idcap') return Promise.resolve(null);
   return idcapCall('idcap://configuration/servicecountry/get', {}).then(function (r) { return r == null ? null : r; }, function () { return null; });
+}
+// Network state (IDCAP network/configuration/get, as in LG's key sample): {internet: true|false|null,
+// raw}. internet = isInternetConnectionAvailable; null when the call fails or on HCAP.
+export function getNetwork() {
+  if (api !== 'idcap') return Promise.resolve({ internet: null, raw: null });
+  return idcapCall('idcap://network/configuration/get', {}).then(function (r) {
+    var v = r && r.isInternetConnectionAvailable;
+    return { internet: typeof v === 'boolean' ? v : (v === 'true' ? true : v === 'false' ? false : null), raw: r || null };
+  }, function (e) { return { internet: null, raw: null, error: e.message }; });
+}
+// Installer Menu items (hcap.js hcap.property.InstallerMenuItem numbers; BANNER_SELECT is 107:
+// "selects the type of banner displayed during channel change (0/1)"). IDCAP
+// configuration/installermenuitem/get|set — parameter names are not in our doc extracts, so the
+// numeric item is tried first and the item name second; the error of both is reported.
+export var INSTALLER_ITEMS = { BANNER_SELECT: 107 };
+function installerParams(item, extra) {
+  var name = Object.keys(INSTALLER_ITEMS).filter(function (k) { return INSTALLER_ITEMS[k] === item; })[0] || String(item);
+  var a = { item: item }, b = { item: name };
+  Object.keys(extra || {}).forEach(function (k) { a[k] = extra[k]; b[k] = extra[k]; });
+  return [a, b];
+}
+function firstOk(calls) {
+  return calls.reduce(function (p, c) { return p.then(null, function (e1) { return c().then(null, function (e2) { throw new Error((e1 && e1.message ? e1.message + '; ' : '') + e2.message); }); }); }, Promise.reject(null));
+}
+export function getInstallerMenuItem(item) {
+  if (api === 'hcap') return hcapCall(hcap.property.getInstallerMenuItem, { item: item }).then(function (r) { return r && r.value !== undefined ? r.value : null; });
+  var ps = installerParams(item, {});
+  return firstOk(ps.map(function (params) { return function () { return idcapCall('idcap://configuration/installermenuitem/get', params); }; }))
+    .then(function (r) { return r && r.value !== undefined ? r.value : (r && r.item_value !== undefined ? r.item_value : null); });
+}
+export function setInstallerMenuItem(item, value) {
+  if (api === 'hcap') return hcapCall(hcap.property.setInstallerMenuItem, { item: item, value: Number(value) });
+  var ps = installerParams(item, { value: Number(value) });
+  return firstOk(ps.map(function (params) { return function () { return idcapCall('idcap://configuration/installermenuitem/set', params).then(function () { return params; }); }; }));
 }
 export function setPowerMode(mode) {
   var m = String(mode).toUpperCase() === 'WARM' ? 'WARM' : 'NORMAL';

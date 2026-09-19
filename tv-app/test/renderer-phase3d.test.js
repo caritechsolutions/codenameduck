@@ -164,6 +164,7 @@ test('a layout pushed live is drawn on the next offline boot; a newer bundle ove
   // a bundle with a newer state_version overrides an older cache: publish a new snapshot with
   // another edit, then age the cache (as LG's app-update wipe or a stale cache would) and reboot
   s.stack.setOffline(false);
+  await page.evaluate(() => window.__cc.registerNow());   // do not wait for the 5/10/20 s retry schedule
   const edited2 = { ...edited, zones: edited.zones.map((z) => (z.id === 'hello' ? { ...z, text: 'BUNDLED {{hotel}}' } : z)) };
   await s.stack.api('PUT', `/api/admin/layouts/${s.layoutId}`, { name: cur.name, json: edited2 }, s.cookie);
   await page.waitForFunction(() => /^BUNDLED/.test(document.getElementById('zone-hello').textContent), null, { timeout: 5000 });

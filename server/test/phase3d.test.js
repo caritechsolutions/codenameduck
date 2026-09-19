@@ -254,3 +254,91 @@ test('D4: an undecryptable licence is withheld with a "cannot decrypt" reason an
   const lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
   assert.equal(lic.readable, false);
 });
+
+// ---- Part D4b: connectivity-aware licence failures, "Hide TV's own OSD" group setting ----
+
+test('D4b: a "fail" reported without internet is recorded but never marks the licence failed', async (t) => {
+  const s = await startServer(); t.after(s.close);
+  const { cookie } = await s.login();
+  await s.call('POST', '/api/admin/licences', { cookie, body: { files: [{ filename: 'NETFLIX_caritech.lic', content: NFX }] } });
+  const reg = await s.registerSet('NET1', { api: 'idcap', model_name: '43UM670H0UA' });
+  const auth = `set_id=${reg.json.set_id}&token=${reg.json.token}`;
+  // event-level flag (the renderer's apps_registration carries internet:false)
+  let r = await s.call('POST', `/api/tv/events?${auth}`, { body: { events: [{ name: 'apps_registration', payload: { ok: null, internet: false, offline: true, results: [{ id: 'netflix', tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE', ok: null, offline: true }] } }] } });
+  assert.equal(r.status, 200);
+  let lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.equal(lic.failed, null, 'not counted');
+  assert.ok(s.logs.some((l) => /licences: netflix "fail" on 43UM670H0UA while the set had no internet — not counted/.test(l)));
+  // result-level flag alone is enough too
+  await s.call('POST', `/api/tv/events?${auth}`, { body: { events: [{ name: 'apps_registration', payload: { ok: false, results: [{ id: 'netflix', tokenResult: 'fail', ok: false, offline: true }] } }] } });
+  lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.equal(lic.failed, null);
+  // with internet the same result counts
+  await s.call('POST', `/api/tv/events?${auth}`, { body: { events: [{ name: 'apps_registration', payload: { ok: false, internet: true, results: [{ id: 'netflix', tokenResult: 'fail', errorMessage: 'IDCAP_RESULT_FAILURE', ok: false }] } }] } });
+  lic = (await s.call('GET', '/api/admin/licences', { cookie })).json.licences[0];
+  assert.equal(lic.failed.model, '43UM670H0UA');
+  // the network_restored reason is stored like any other event
+  await s.call('POST', `/api/tv/events?${auth}`, { body: { events: [{ name: 'apps_registration_reason', payload: { trigger: 'network_restored', sending: ['netflix'], internet: true } }] } });
+  const ev = (await s.call('GET', `/api/admin/sets/${reg.json.set_id}`, { cookie })).json.events.find((e) => e.type === 'tv_apps_registration_reason');
+  assert.equal(ev.payload.trigger, 'network_restored');
+});
+
+test('D4b: tv_osd — default banner/1, group setting validated, in register/poll answers, WS layout pushes and the bundle snapshot', async (t) => {
+  const { dir } = tenantsWithRenderer();
+  const s = await startServer({ tenantsDir: dir }); t.after(s.close);
+  const { cookie } = await s.login();
+  const r0 = await s.registerSet('OSD1', { api: 'idcap' });
+  assert.deepEqual(r0.json.tv_osd, { mode: 'banner', banner_select: 1 }, 'sets without a group hide the banner by default');
+  const g = (await s.call('POST', '/api/admin/groups', { cookie, body: { name: 'Std' } })).json;
+  assert.equal(g.hide_tv_osd, 'banner'); assert.equal(g.banner_select, 1);
+  assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { hide_tv_osd: 'always' } })).status, 400);
+  assert.equal((await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { banner_select: 2 } })).status, 400);
+  await s.call('PATCH', `/api/admin/sets/${r0.json.set_id}`, { cookie, body: { group_id: g.id } });
+  // WS: the layout push carries tv_osd and a change to the group pushes again
+  const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${r0.json.set_id}&token=${r0.json.token}`, { headers: { Host: 'hoteldemo.caritech.net' } });
+  t.after(() => ws.close());   // an open socket would keep the runner alive on a failed assertion
+  const msgs = [];
+  await new Promise((resolve, reject) => { ws.on('message', (m) => { const j = JSON.parse(m.toString()); msgs.push(j); if (j.type === 'hello') resolve(); }); ws.once('error', reject); });
+  await new Promise((r) => setTimeout(r, 300));
+  const before = msgs.filter((m) => m.type === 'layout').length;
+  const gp = await s.call('PATCH', `/api/admin/groups/${g.id}`, { cookie, body: { hide_tv_osd: 'osd_lock', banner_select: 0 } });
+  assert.equal(gp.status, 200); assert.equal(gp.json.hide_tv_osd, 'osd_lock'); assert.equal(gp.json.banner_select, 0);
+  await new Promise((r) => setTimeout(r, 300));
+  const layouts = msgs.filter((m) => m.type === 'layout');
+  assert.equal(layouts.length, before + 1, 'one more layout push for the OSD change alone');
+  assert.deepEqual(layouts[layouts.length - 1].tv_osd, { mode: 'osd_lock', banner_select: 0 });
+  ws.close();
+  const p = await s.call('GET', `/api/tv/poll?set_id=${r0.json.set_id}&token=${r0.json.token}`);
+  assert.deepEqual(p.json.tv_osd, { mode: 'osd_lock', banner_select: 0 });
+  // bundle snapshot: per group + default
+  await s.call('POST', '/api/admin/deployment/publish', { cookie, body: {} });
+  const st = JSON.parse(fs.readFileSync(path.join(dir, 'hoteldemo', 'procentric', 'application', 'state.json'), 'utf8'));
+  assert.deepEqual(st.tv_osd_default, { mode: 'banner', banner_select: 1 });
+  assert.deepEqual(st.groups.find((x) => x.id === g.id).tv_osd, { mode: 'osd_lock', banner_select: 0 });
+});
+
+test('D4b: a set connecting with an older state_version (sv=) gets the current state pushed at connect', async (t) => {
+  const s = await startServer(); t.after(s.close);
+  const { cookie } = await s.login();
+  const L = (await s.call('POST', '/api/admin/layouts', { cookie, body: { name: 'A', json: { schema: 2, canvas: { w: 1920, h: 1080 }, zones: [{ id: 't', type: 'text', x: 0, y: 0, w: 900, h: 80, text: 'ONE' }], pages: [{ id: 'home', name: 'Home', zones: ['t'] }], home: 'home' } } })).json;
+  await s.call('PATCH', '/api/admin/tenant', { cookie, body: { default_layout_id: L.id } });
+  const r = await s.registerSet('SV1', { api: 'idcap' });
+  const v0 = r.json.state_version;
+  // a change lands between the register answer and the WS connect
+  await s.call('PUT', `/api/admin/layouts/${L.id}`, { cookie, body: { name: 'A', json: { schema: 2, canvas: { w: 1920, h: 1080 }, zones: [{ id: 't', type: 'text', x: 0, y: 0, w: 900, h: 80, text: 'TWO' }], pages: [{ id: 'home', name: 'Home', zones: ['t'] }], home: 'home' } } });
+  const open = (sv) => new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${s.port}/ws/tv?set_id=${r.json.set_id}&token=${r.json.token}${sv == null ? '' : '&sv=' + sv}`, { headers: { Host: 'hoteldemo.caritech.net' } });
+    const msgs = []; ws.on('message', (m) => msgs.push(JSON.parse(m.toString()))); ws.once('error', reject);
+    setTimeout(() => { ws.close(); resolve(msgs); }, 400);
+  });
+  const behind = await open(v0);
+  const lay = behind.find((m) => m.type === 'layout');
+  assert.ok(lay, 'layout pushed at connect: ' + behind.map((m) => m.type).join(','));
+  assert.equal(lay.layout.zones[0].text, 'TWO'); assert.ok(lay.state_version > v0);
+  assert.ok(s.logs.some((l) => /connected with state v\d+ < v\d+ — pushing the current state/.test(l)));
+  const after = (await s.call('GET', `/api/tv/poll?set_id=${r.json.set_id}&token=${r.json.token}`)).json.state_version;
+  assert.equal(after, lay.state_version, 'the catch-up push does not bump the version');
+  // up to date (or no sv at all, older renderer): nothing pushed at connect
+  assert.ok(!(await open(after)).some((m) => m.type === 'layout'));
+  assert.ok(!(await open(null)).some((m) => m.type === 'layout'));
+});

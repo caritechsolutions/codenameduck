@@ -170,12 +170,18 @@ function createAppStore(db, { log = () => {}, licences = null } = {}) {
   // The set's registration report: ok (all tokens succeeded), result (first raw LG event) and
   // results (one per token: {id, tokenResult "success"|"fail", errorMessage}). A "fail" marks the
   // licence so it is not retried until it is edited.
-  function recordRegistration(tenant, set, { ok, result, results }) {
-    upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(results && results.length ? { ok, results } : (result == null ? null : result)).slice(0, 4000));
+  // D4b: a "fail" reported while the set had no internet (internet:false on the event, or
+  // offline:true on the result) is a connectivity problem — recorded, never counted as a licence
+  // failure, no backoff.
+  function recordRegistration(tenant, set, { ok, result, results, internet }) {
+    upsertReg.run(set.id, ok == null ? null : (ok ? 1 : 0), JSON.stringify(results && results.length ? { ok, results, internet } : (result == null ? null : result)).slice(0, 4000));
     if (licences && Array.isArray(results)) {
       for (const r of results) {
         if (!r || !r.id) continue;
-        if (/^fail/i.test(String(r.tokenResult ?? ''))) licences.markFailed(r.id, set.model, r.errorMessage || r.detail || null);
+        if (/^fail/i.test(String(r.tokenResult ?? ''))) {
+          if (internet === false || r.offline === true) { log(`licences: ${r.id} "fail" on ${set.model || '?'} while the set had no internet — not counted`); continue; }
+          licences.markFailed(r.id, set.model, r.errorMessage || r.detail || null);
+        }
         else if (r.ok === true || /^success$/i.test(String(r.tokenResult ?? ''))) licences.clearFailed(r.id);
       }
     }

@@ -7,7 +7,7 @@
 //   env  — live data: lineup[], currentIndex, focus {zone,index}, weather, units,
 //          videoRect(zone) → {x,y,w,h} (renderer: fullscreen expands it), preview (bool)
 
-import { visibleZoneList, isFocusable, actionOf, NAV_ZONE_TYPES, DEFAULT_FOCUS, homePageId } from './layout-model.js';
+import { visibleZoneList, isFocusable, actionOf, NAV_ZONE_TYPES, ITEM_FOCUS_TYPES, DEFAULT_FOCUS, homePageId } from './layout-model.js';
 
 export var VARIABLES = ['hotel', 'room', 'guest', 'guest_first', 'guest_last', 'checkin_date', 'checkout_date', 'nights', 'time', 'date'];
 export var PLACEMENT_TYPES = ['banner', 'digits', 'popup'];
@@ -107,11 +107,18 @@ export function drawChannelList(e, z, ctx, env) {
   var rowH = (st.fontSize || 28) * 1.6;
   var visible = Math.max(1, Math.floor(z.h / rowH));
   var cur = env && env.currentIndex != null ? env.currentIndex : -1;
-  var start = Math.max(0, Math.min(cur - Math.floor(visible / 2), lineup.length - visible));
+  // E1: the highlight (remote focus) is separate from the playing channel. The window scrolls
+  // around the focused row while the list has focus, around the playing channel otherwise.
+  var focus = (env && env.focus) || {};
+  var foc = focus.zone === z.id && typeof focus.index === 'number' ? focus.index : -1;
+  var anchor = foc >= 0 ? foc : cur;
+  var start = Math.max(0, Math.min(anchor - Math.floor(visible / 2), lineup.length - visible));
   lineup.slice(start, start + visible).forEach(function (ch, i) {
-    var row = el('div', 'chrow' + (start + i === cur ? ' current' : ''));
+    var idx = start + i;
+    var row = el('div', 'chrow' + (idx === cur ? ' current' : '') + (idx === foc ? ' focused' : ''));
+    row.setAttribute('data-index', String(idx));
     row.style.height = rowH + 'px'; row.style.lineHeight = rowH + 'px';
-    if (start + i === cur && st.highlight) { row.style.background = st.highlight; row.style.color = st.highlightText || '#1a1a1a'; }
+    if (idx === cur && st.highlight) { row.style.background = st.highlight; row.style.color = st.highlightText || '#1a1a1a'; }
     row.appendChild(el('span', 'chnum', String(ch.number)));
     if (ch.logo_url) { var img = mediaImg(ch.logo_url, env); img.className = 'chlogo'; row.appendChild(img); }
     row.appendChild(el('span', 'chname', ch.name));
@@ -221,7 +228,7 @@ export function zoneElement(z, ctx, env) {
   e.style.left = (z.x || 0) + 'px'; e.style.top = (z.y || 0) + 'px';
   e.style.width = (z.w || 0) + 'px'; e.style.height = (z.h || 0) + 'px';
   applyStyle(e, z.style);
-  if (isFocusable(z) && NAV_ZONE_TYPES.indexOf(z.type) < 0) {
+  if (isFocusable(z) && ITEM_FOCUS_TYPES.indexOf(z.type) < 0) {
     e.classList.add('focusable');
     var f = (env && env.focus) || {};
     if (f.zone === z.id) { e.classList.add('focused'); if (z.focusStyle) applyStyle(e, z.focusStyle); }

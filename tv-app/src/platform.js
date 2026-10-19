@@ -241,17 +241,21 @@ export function currentChannel() {
 
 // ------------------------------------------------------------------ keys
 // attribute: 0 = TV firmware handles the key, 1 = delivered to the app.
+// Resolves with one result per key ({key, ok, error|reply}) so the renderer can report what
+// LG actually accepted (E1: the TV also acting on CH± looked like a shared key table).
 export function claimKeys(names, attribute) {
-  if (!api) return Promise.resolve();
+  if (!api) return Promise.resolve([]);
+  var results = [];
   var seq = Promise.resolve();
   names.forEach(function (name) {
     seq = seq.then(function () {
       var p = api === 'idcap' ? idcapCall('idcap://system/key/add', { keycode: 0, virtualKeycode: name, attribute: attribute })
         : hcapCall(hcap.key.addKeyItem, { keycode: 0, virtualKeycode: hcap.key.Code[name], attribute: attribute });
-      return p.then(null, function () {});
+      return p.then(function (r) { results.push({ key: name, ok: true, reply: r === undefined ? null : r }); },
+        function (e) { results.push({ key: name, ok: false, error: e && e.message }); });
     });
   });
-  return seq;
+  return seq.then(function () { return results; });
 }
 export function resetKeys() {
   if (!api) return Promise.resolve();

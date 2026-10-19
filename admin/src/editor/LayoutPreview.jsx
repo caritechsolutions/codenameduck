@@ -22,7 +22,10 @@ export default function LayoutPreview({ doc, pageId, width = 960, tenant, apps =
   const stageRef = useRef(null);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
-  const firstFocus = draw.visibleZones(doc, pageId, { fullscreen }).find((z) => isFocusable(z));
+  // Demo focus: a menu/button/app tile first; the channel list (focusable since E1) only when
+  // nothing else on the page can take the remote.
+  const vis = draw.visibleZones(doc, pageId, { fullscreen });
+  const firstFocus = vis.find((z) => isFocusable(z) && z.type !== 'channel_list') || vis.find((z) => isFocusable(z));
   const focusKey = firstFocus && firstFocus.id;
   useEffect(() => {
     const stage = stageRef.current; if (!stage) return;

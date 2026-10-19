@@ -14,6 +14,9 @@ var PROPERTY_KEYS = ['serial_number', 'model_name', 'platform_version', 'firmwar
 var REGISTER_RETRY_MS = [5000, 10000, 20000, 30000, 60000];   // then every 60 s for as long as the server is unreachable
 var CACHE_KEY = 'cc_state';               // last good /api/tv/register answer (offline-first, Part D)
 var API = { base: '', tenant: null, bundled: false, bundleVersion: null };   // where the server is; '' = same origin (remote-run)
+// LG key-table attribute for the keys we claim: 0 = TV firmware, 1 = app, 2 = app (alt).
+// Overridable from the page URL (?keyattr=2) so it can be tried on a set without a rebuild.
+var KEY_ATTRIBUTE = (function () { var m = /[?&]keyattr=(\d)/.exec(location.search || ''); return m ? Number(m[1]) : 1; })();
 var CLAIMED_KEYS = ['CH_UP', 'CH_DOWN', 'NUM_0', 'NUM_1', 'NUM_2', 'NUM_3', 'NUM_4', 'NUM_5', 'NUM_6', 'NUM_7', 'NUM_8', 'NUM_9', 'PORTAL', 'GUIDE', 'INFO', 'BACK', 'LAST_CH', 'NETFLIX'];
 var NETFLIX_LAUNCHER_VERSION = '1.0';
 var BANNER_MS = 3500;
@@ -502,6 +505,10 @@ function focusTargets() {
     if (model.NAV_ZONE_TYPES.indexOf(z.type) >= 0) {
       var items = e.querySelectorAll('.menuitem, .apptile');
       for (var i = 0; i < items.length; i++) out.push({ zone: z.id, index: i, rect: stageRect(items[i]), zoneObj: z });
+    } else if (z.type === 'channel_list') {
+      // E1: one target per visible row; index = position in the lineup (data-index)
+      var rows = e.querySelectorAll('.chrow[data-index]');
+      for (var r = 0; r < rows.length; r++) out.push({ zone: z.id, index: Number(rows[r].getAttribute('data-index')), rect: stageRect(rows[r]), zoneObj: z });
     } else out.push({ zone: z.id, index: 0, rect: stageRect(e), zoneObj: z });
   });
   return out;
@@ -520,6 +527,7 @@ function setFocus(t) {
     var e = document.getElementById('zone-' + id);
     if (!z || !e) continue;
     if (model.NAV_ZONE_TYPES.indexOf(z.type) >= 0) renderMenu(e, z);
+    else if (z.type === 'channel_list') renderChannelList(e, z);
     else { var fresh = draw.zoneElement(z, textContext(), drawEnv()); if (fresh) e.parentNode.replaceChild(fresh, e); }
   }
 }
@@ -527,6 +535,12 @@ function moveFocusDir(dir) {
   var targets = focusTargets();
   if (!targets.length) return false;
   var cur = focusedTarget(targets);
+  // E1: inside a channel list UP/DOWN walk the lineup (the window scrolls with the highlight);
+  // only at either end does the key fall through to spatial navigation.
+  if (cur >= 0 && targets[cur].zoneObj.type === 'channel_list' && (dir === 'up' || dir === 'down')) {
+    var ni = targets[cur].index + (dir === 'up' ? -1 : 1);
+    if (ni >= 0 && ni < state.lineup.length) { setFocus({ zone: targets[cur].zone, index: ni }); return true; }
+  }
   var next = model.spatialNext(targets.map(function (t) { return t.rect; }), cur, dir);
   if (next < 0) return true;   // nothing that way: swallow the key, keep the highlight
   setFocus(targets[next]);
@@ -540,6 +554,7 @@ function activateFocus() {
   if (i < 0) { if (targets.length) setFocus(targets[model.spatialNext(targets.map(function (t) { return t.rect; }), -1, 'down')]); return targets.length > 0; }
   var t = targets[i];
   if (model.NAV_ZONE_TYPES.indexOf(t.zoneObj.type) >= 0) { var it = menuItems(t.zoneObj)[t.index]; if (!it) return false; doAction(it); }
+  else if (t.zoneObj.type === 'channel_list') { var ch = state.lineup[t.index]; if (!ch) return false; tuneTo(ch); }
   else doAction(t.zoneObj.action);
   return true;
 }
@@ -561,6 +576,8 @@ function onKeyDown(ev) {
   else if (keys[name]) doAction(keys[name]);
   else if (name === 'PORTAL' || name === 'GUIDE') doAction({ type: 'fullscreen_tv' });
   else if (name === 'BACK' || name === 'EXIT') doAction({ type: 'back' });
+  else if (state.fullscreen && (name === 'UP' || name === 'DOWN')) step(name === 'UP' ? 1 : -1);   // E1: zap in full screen
+  else if (state.fullscreen && name === 'ENTER') { if (state.channel) channelBanner(); else handled = false; }
   else if (name === 'UP') handled = moveFocusDir('up');
   else if (name === 'DOWN') handled = moveFocusDir('down');
   else if (name === 'LEFT') handled = moveFocusDir('left');
@@ -989,7 +1006,7 @@ function pauseForBackground() {
 function resumeFromBackground() {
   var away = state.hiddenAt ? Math.round((Date.now() - state.hiddenAt) / 1000) : null;
   state.hiddenAt = null;
-  var p = state.api ? tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys re-claimed'); }, function (e) { reportError('keys', 'claim after app: ' + e.message); }) : Promise.resolve();
+  var p = state.api ? tv.claimKeys(CLAIMED_KEYS, KEY_ATTRIBUTE).then(function (res) { log('keys re-claimed'); sendEvent('keys', { attribute: KEY_ATTRIBUTE, results: res, trigger: 'resume' }); }, function (e) { reportError('keys', 'claim after app: ' + e.message); }) : Promise.resolve();
   p.then(function () {
     if (state.videoPaused && state.channel) {
       var z = ((state.layout && state.layout.zones) || []).filter(function (x) { return x.type === 'video'; })[0];
@@ -1002,7 +1019,7 @@ function resumeFromBackground() {
 function preparePlatform() {
   // Claim the keys the lineup needs; leave VOL/MUTE with the TV firmware. Then make sure the
   // set is on the TV input so no external-input OSD covers the layout.
-  return tv.claimKeys(CLAIMED_KEYS, 1).then(function () { log('keys claimed: ' + CLAIMED_KEYS.length); }, function () {}).then(ensureTvInput).then(readAppList)
+  return tv.claimKeys(CLAIMED_KEYS, KEY_ATTRIBUTE).then(function (res) { log('keys claimed: ' + CLAIMED_KEYS.length); sendEvent('keys', { attribute: KEY_ATTRIBUTE, results: res, trigger: 'boot' }); }, function () {}).then(ensureTvInput).then(readAppList)
     .then(function () { return checkInternet().then(function (net) { log('internet: ' + net); }); });
 }
 function readAppList() {

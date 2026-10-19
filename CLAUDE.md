@@ -666,3 +666,22 @@ Decisions already made (do not re-open):
   are captured before the OSD wait, so a fast server answer cannot relabel a cache/bundle boot.
 - `tv-app/package.json` `npm test` now lists every renderer test file (b3c, b3d, 3c, 3d, 3d4 had
   been left out of the script).
+
+### Part E1 — channel list on the arrow keys, CH± ownership evidence (2026-10-19)
+
+- `shared/layout-model.js`: `channel_list` is focusable (`isFocusable`) and in `ITEM_FOCUS_TYPES`
+  (= `NAV_ZONE_TYPES` + channel_list: focus lives on an item, the zone never gets the ring).
+  `drawChannelList` marks the focused row (`.chrow.focused`, `data-index` = lineup index) and
+  anchors the visible window on the focused row while the list has focus, on the playing
+  channel (`.current`) otherwise.
+- Renderer: `focusTargets()` emits one target per visible row (index = lineup index);
+  `moveFocusDir` walks the lineup on UP/DOWN inside the list (scrolling the window) and only at
+  either end falls through to spatial navigation; OK on a row → `tuneTo`. CH± unchanged (direct
+  zap). In full screen UP/DOWN zap and OK shows the channel banner.
+- Key ownership evidence: `platform.claimKeys` resolves with per-key `{key, ok, reply|error}`;
+  the renderer sends a `keys` event (`tv_keys {attribute, results, trigger: boot|resume}`). The
+  attribute defaults to 1 and can be overridden per page load with `?keyattr=2` (LG: 0 = TV
+  firmware, 1/2 = app) to find out on a set whether the firmware still zaps on CH±.
+- Admin `LayoutPreview` demo focus prefers a menu/button over the channel list.
+- Test: `tv-app/test/renderer-phase3e1.test.js`. Chromium for the renderer tests in this sandbox:
+  `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers PLAYWRIGHT_MODULE=/opt/node22/lib/node_modules/playwright`.

@@ -591,3 +591,26 @@ the payload and appear in the journal, and a failure is retried after 1 h (doubl
     netflix"}}` before the app opens, and `{value: "1", why: "resumed"}` when you come back. Exit
     the portal (Installation Menu / power off): `why: "on_destroy"` or nothing — tell me which.
     Check that volume keys still work in this mode.
+
+## Phase 3 Part E1 — channel list on the arrow keys, CH± ownership (2026-10-19)
+
+Deploy from main, publish the bundle (renderer changed), power-cycle the set.
+
+1. **Key claim evidence.** Drawer → events → `tv_keys` (trigger `boot`): `attribute: 1` and one
+   entry per key. Tell me any entry with `ok: false` and the `error` text, and whether CH_UP /
+   CH_DOWN show `ok: true`.
+2. **Who owns CH±.** Press PORTAL (full screen), then CH+ once. Expect exactly one `tv_channel`
+   event and the portal's own banner. If LG's RF-channel banner also appears, or the picture
+   changes to a tuner channel outside the lineup, the firmware is acting on the key too. Then
+   reload the app with `?keyattr=2` (Settings → Deployment is not needed: in remote-run mode add
+   `?keyattr=2` to the xait `<url>` by hand, or ask me) and repeat; `tv_keys.attribute` must say 2.
+   Report which attribute leaves only our zap.
+3. **Channel list with the arrows.** On the home page press DOWN: the first row of the channel
+   list gets the focus ring (layout focus colour), the playing channel keeps its "current" shade.
+   DOWN/UP walk the rows and the list scrolls when the highlight reaches the edge of the window;
+   the channel does **not** change while moving. OK tunes the highlighted channel (banner + one
+   `tv_channel` event). CH+/CH− still zap directly and leave the highlight where it is.
+4. **Leaving the list.** LEFT/RIGHT (and UP/DOWN at the ends) move the focus to the nearest other
+   focusable element (menu, button, apps). From that element an arrow back lands on a row.
+5. **Full screen.** PORTAL: UP = next channel, DOWN = previous, OK shows the channel banner,
+   PORTAL again returns to the layout with the video still playing (no re-tune).

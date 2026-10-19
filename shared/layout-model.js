@@ -15,6 +15,9 @@ export var ACTION_TYPES = ['none', 'goto_page', 'back', 'fullscreen_tv', 'tune',
 export var LEGACY_ACTION_TYPES = ['reload'];           // still accepted (keys / admin commands)
 export var ACTION_ZONE_TYPES = ['text', 'image', 'button'];   // focusable when they carry an action
 export var NAV_ZONE_TYPES = ['menu', 'app_launcher', 'apps'];  // item-level focus
+// Zones whose focus lives on an item inside them (menu items, app tiles, channel rows): the
+// zone itself never gets the focus ring.
+export var ITEM_FOCUS_TYPES = NAV_ZONE_TYPES.concat(['channel_list']);
 export var DEFAULT_FOCUS = { color: '#ffd166', width: 6, radius: 12 };
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
@@ -111,6 +114,7 @@ export function visibleZoneList(layout, pageId, opts) {
 export function isFocusable(z) {
   if (!z) return false;
   if (NAV_ZONE_TYPES.indexOf(z.type) >= 0) return true;
+  if (z.type === 'channel_list') return true;   // E1: rows are focusable, OK tunes
   return ACTION_ZONE_TYPES.indexOf(z.type) >= 0 && !!actionOf(z.action);
 }
 
